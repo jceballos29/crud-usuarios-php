@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-function environment(string $clave): string
+function environment(string $name): string
 {
-    $valor = getenv($clave);
+    $value = getenv($name);
 
-    if ($valor === false || $valor === '') {
-        fwrite(STDERR, "Falta la variable de entorno $clave" . PHP_EOL);
+    if ($value === false || $value === '') {
+        fwrite(STDERR, "Falta la variable de entorno $name" . PHP_EOL);
         exit(1);
     }
 
-    return $valor;
+    return $value;
 }
 
 $dsn = sprintf(
