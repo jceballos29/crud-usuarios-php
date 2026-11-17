@@ -9,11 +9,25 @@ Cómo usar este documento:
 - Al final de cada fase hay preguntas de comprobación. Si puedes responderlas con tus palabras, la fase está aprendida.
 - Referencias `(Guía §X)` apuntan a la sección del PDF.
 
+### Convención de nombres (decisión: código en inglés)
+
+El plan y la guía usan español; **tu código va en inglés**. Equivalencias:
+
+| Guía / plan | Tu proyecto |
+|-------------|-------------|
+| `usuarios` | `users` |
+| `nombre`, `apellido`, `correo`, `telefono`, `creado_en` | `name`, `last_name`, `email`, `phone`, `created_at` |
+| `crear.php`, `editar.php`, `eliminar.php` | `create.php`, `edit.php`, `delete.php` |
+| `conexion.php` | `connection.php` |
+| `$usuarios`, `$errores`, `$datos` | `$users`, `$errors`, `$data` |
+
+El texto que ve el usuario final sigue en español.
+
 ## Progreso general
 
 | Fase | Resultado | Estado |
 |------|-----------|--------|
-| 0 | Entorno Docker corriendo | [ ] |
+| 0 | Entorno Docker corriendo | [x] |
 | 1 | Tabla `usuarios` con datos de prueba | [ ] |
 | 2 | PHP habla con MySQL | [ ] |
 | 3 | Listado de usuarios (Read) | [ ] |
@@ -57,58 +71,69 @@ Navegador ──HTTP──> nginx (:8080) ──FastCGI──> php (php-fpm :900
 
 ### 0.2 Verificar requisitos
 
-- [ ] Ejecuta `docker --version` y `docker compose version`. Ambos deben responder.
-- [ ] Ejecuta `docker ps`. Si da error de permisos, tu usuario no está en el grupo `docker` (pregunta y lo resolvemos).
-- [ ] Verifica que los puertos 8080 y 8081 estén libres: `ss -ltn | grep -E ':(8080|8081)'` (si no imprime nada, están libres).
+- [x] Ejecuta `docker --version` y `docker compose version`. Ambos deben responder.
+- [x] Ejecuta `docker ps`. Si da error de permisos, tu usuario no está en el grupo `docker` (pregunta y lo resolvemos).
+- [x] Verifica que los puertos 8080 y 8081 estén libres: `ss -ltn | grep -E ':(8080|8081)'` (si no imprime nada, están libres).
 
 ### 0.3 Traer el stack base al proyecto
 
 La carpeta del proyecto ya existe (`crud-usuarios-docker/`). Hay que copiar dentro el contenido de `php-docker-stack.zip`.
 
-- [ ] Descomprime el zip en una carpeta temporal, **no** dentro del proyecto (investiga `unzip -d`).
-- [ ] Copia **el contenido** de `php-docker-stack/` dentro de `crud-usuarios-docker/` (cuidado: copiar el *contenido*, no la carpeta; piensa qué diferencia hay entre `cp -r origen/ destino/` y `cp -r origen/. destino/`).
-- [ ] **No** copies la carpeta `.git` del zip ni el `.env` que trae: tu proyecto tendrá su propio historial y sus propias claves.
-- [ ] Inicia tu propio repositorio: `git init` dentro de `crud-usuarios-docker/`.
+- [x] Descomprime el zip en una carpeta temporal, **no** dentro del proyecto (investiga `unzip -d`).
+- [x] Copia **el contenido** de `php-docker-stack/` dentro de `crud-usuarios-docker/` (cuidado: copiar el *contenido*, no la carpeta; piensa qué diferencia hay entre `cp -r origen/ destino/` y `cp -r origen/. destino/`).
+- [x] **No** copies la carpeta `.git` del zip ni el `.env` que trae: tu proyecto tendrá su propio historial y sus propias claves.
+- [x] Inicia tu propio repositorio: `git init` dentro de `crud-usuarios-docker/`.
 
 ### 0.4 Leer el stack antes de ejecutarlo
 
 Abre y lee cada archivo. Para cada uno, escribe en una línea (en un cuaderno o en comentarios tuyos) qué hace:
 
-- [ ] `docker-compose.yml`: ¿qué 4 servicios define? ¿qué significa `depends_on` con `condition: service_healthy`? ¿por qué los puertos van como `127.0.0.1:8080:80`?
-- [ ] `docker/php/Dockerfile`: ¿qué extensión de PHP es la que permite conectarse a MySQL? ¿para qué sirven `HOST_UID` y `HOST_GID`?
-- [ ] `docker/nginx/default.conf`: ¿cuál es el `root`? ¿qué hace `try_files`? ¿por qué se bloquean los archivos que empiezan por punto?
-- [ ] `docker/php/php.ini`: ¿qué hace `display_errors = On` y por qué solo es adecuado en desarrollo?
+- [x] `docker-compose.yml`: ¿qué 4 servicios define? ¿qué significa `depends_on` con `condition: service_healthy`? ¿por qué los puertos van como `127.0.0.1:8080:80`?
+- [x] `docker/php/Dockerfile`: ¿qué extensión de PHP es la que permite conectarse a MySQL? ¿para qué sirven `HOST_UID` y `HOST_GID`?
+- [x] `docker/nginx/default.conf`: ¿cuál es el `root`? ¿qué hace `try_files`? ¿por qué se bloquean los archivos que empiezan por punto?
+- [x] `docker/php/php.ini`: ¿qué hace `display_errors = On` y por qué solo es adecuado en desarrollo?
 
 > Dato clave para después: Nginx está configurado para que **si un archivo no existe, se ejecute `index.php`**. Por eso, si escribes mal una URL (`/creaar.php`) verás el listado en vez de un 404. No es un bug, es el comportamiento del *front controller*.
 
 ### 0.5 Configurar `.env`
 
-- [ ] Copia `.env.example` a `.env`.
-- [ ] Cambia `DB_DATABASE` a `crud_usuarios`.
-- [ ] Cambia `DB_USERNAME` a `crud` (o el nombre que prefieras).
-- [ ] Pon claves reales (distintas entre sí) en `DB_PASSWORD` y `DB_ROOT_PASSWORD`.
-- [ ] Ejecuta `id -u` e `id -g` y pon esos valores en `HOST_UID` / `HOST_GID` si no son 1000.
-- [ ] Comprueba que `.env` aparece en `.gitignore` (¿por qué no se sube a git?).
+- [x] Copia `.env.example` a `.env`.
+- [x] Cambia `DB_DATABASE` a `crud_usuarios`.
+- [x] Cambia `DB_USERNAME` a `crud` (o el nombre que prefieras).
+- [x] Pon claves reales (distintas entre sí) en `DB_PASSWORD` y `DB_ROOT_PASSWORD`.
+- [x] Ejecuta `id -u` e `id -g` y pon esos valores en `HOST_UID` / `HOST_GID` si no son 1000.
+- [x] Comprueba que `.env` aparece en `.gitignore` (¿por qué no se sube a git?).
 
 ### 0.6 Levantar
 
-- [ ] `docker compose up -d --build` (la primera vez tarda: construye la imagen de PHP).
-- [ ] `docker compose ps`: los 4 servicios deben estar `running` y `db` en `healthy`.
-- [ ] Si algo falla: `docker compose logs <servicio>`.
+- [x] `docker compose up -d --build` (la primera vez tarda: construye la imagen de PHP).
+- [x] `docker compose ps`: los 4 servicios deben estar `running` y `db` en `healthy`.
+- [x] Si algo falla: `docker compose logs <servicio>`.
 
 ### 0.7 Probar
 
-- [ ] Abre http://localhost:8080 → debe mostrar versión de PHP, extensiones con ✔ y "Conectado a MySQL".
-- [ ] Abre http://localhost:8081 (Adminer). Inicia sesión: sistema **MySQL**, servidor `db`, usuario y clave de tu `.env`, base `crud_usuarios`. Debe entrar y mostrar "No tables".
-- [ ] Ejecuta `docker compose exec php php db-check.php` → lista las bases de datos.
-- [ ] Primer commit: `.gitignore` ya excluye `.env`; verifica con `git status` que `.env` no aparece, y haz `git add` + `git commit`.
+- [x] Abre http://localhost:8080 → debe mostrar versión de PHP, extensiones con ✔ y "Conectado a MySQL".
+- [x] Abre http://localhost:8081 (Adminer). Inicia sesión: sistema **MySQL**, servidor `db`, usuario y clave de tu `.env`, base `crud_usuarios`. Debe entrar y mostrar "No tables".
+- [x] Ejecuta `docker compose exec php php db-check.php` → lista las bases de datos.
+- [x] Primer commit: `.gitignore` ya excluye `.env`; verifica con `git status` que `.env` no aparece, y haz `git add` + `git commit`.
 
 ### Preguntas de comprobación
 
 1. ¿Por qué PHP se conecta a `db` y no a `localhost`?
+
+    _Porque en el network que crear docker el localhost en este caso sería phppor eso hay que conectarse a db_
+
 2. ¿Qué pasa con tus datos si haces `docker compose down`? ¿Y con `down -v`?
+
+    _Con down se borrá las instancias pero se mantienen los volúmenes, si se vuelve a correr el build los datos guardados permanecen, con down -v se borra todo incluyendo los volúmenes, entonces si corre el build serían instancias totalmente nuevas y limpias_
+
 3. ¿Qué contenedor ejecuta el código PHP y cuál entrega el CSS?
+
+    _El PHP lo ejecuta phpy el css lo entrega nginx_
+
 4. Cambia el texto de `<h1>` en `src/public/index.php`, guarda y recarga el navegador. ¿Hizo falta reiniciar algo? ¿Por qué no?
+
+    _No hubo necesidad, porque docker ya está entregando lo que están en mi carpeta src_
 
 ---
 
@@ -136,12 +161,13 @@ Antes de escribir SQL, rellena esta tabla con el tipo y restricciones que usarí
 
 | Columna | Tipo | Restricciones | ¿Por qué? |
 |---------|------|---------------|-----------|
-| id | | | |
-| nombre | | | |
-| apellido | | | |
-| correo | | | |
-| telefono | | | ¿por qué texto y no número? |
-| creado_en | | | |
+| id | INT | UNSIGNED NOT NULL AUTO_INCREMENT | Porque es el campo de identificación, se va a generar automáticamente, no puede ser null y no puede tomar números negativos |
+| name | VARCHAR(100) | NOT NULL | El nombre es requisito para la creación del usuario y estima que los nombre no superaran los 100 caractees |
+| last_name | VARCHAR(100) | NOT NULL | El apellido es requisito para la creación del usuario y estima que los nombre no superaran los 100 caractees |
+| email | VARCHAR(254) | NOT NULL | Es un campo obligatorio para la creación de usuario y se toman 255 partiendo el máximo de caracteres de SMTP que liminta a 256 incluyendo los corchetes, entonces es suficiente |
+| password | VARCHAR(255) | NOT NULL | Porque guarda el hash de la constraseña |
+| phone | VARCHAR(20) | DEFAUTL NULL | Es un campo opcional, entonces puede tomar NULL, se elige 20 caracteres partiendo del estandar ITU-T E.164 que da 15 dígitos, se da un margen de 5 caracteres por si se agregan espacios o `+` |
+| created_at | TIMESTAMP | NOT NULL DEFAULT CURRENT_TIMESTAMP | Porque debe guardar el instante exacto en el que se crea el usuario, al definir el DEFAULT se hace de manera automática |
 
 ### 1.4 Probar el SQL a mano primero
 
