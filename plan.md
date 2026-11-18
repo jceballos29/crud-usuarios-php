@@ -31,7 +31,7 @@ El texto que ve el usuario final sigue en español.
 | 1 | Tabla `users` con datos de prueba | [x] |
 | 2 | PHP habla con MySQL y maneja errores | [x] |
 | 3 | Listado de usuarios (Read) | [x] |
-| 4 | Crear usuario (Create) | [ ] |
+| 4 | Crear usuario (Create) | [x] |
 | 5 | Editar usuario (Update) | [ ] |
 | 6 | Eliminar usuario (Delete) | [ ] |
 | 7 | Revisión final del CRUD | [ ] |
@@ -382,7 +382,7 @@ El CSS no es el foco del curso. Clases que usa la guía (§7.7): `.contenedor`, 
 - [x] Tabla vacía muestra "No hay usuarios registrados."
 - [x] Hay estilos aplicados.
 - [x] Borra `test.php` (su contenido ya está en `index.php`).
-- [ ] Commit.
+- [x] Commit.
 
 ### Preguntas de comprobación
 
@@ -412,69 +412,69 @@ Se construye en capas; no escribas todo de golpe.
 
 **4.2.1 Solo el formulario (GET)**
 
-- [ ] Crea `public/create.php`. Lógica arriba (aún vacía), luego `require` del header, el formulario y `require` del footer.
-- [ ] Formulario `method="post" action="create.php"` con campos `name`, `last_name`, `email` (`type="email"`), `phone`; cada uno con `<label for>` enlazado al `id` del input, `maxlength` acorde a la tabla y `required` donde corresponda.
-- [ ] Botones Guardar y Cancelar (enlace a `index.php`).
-- [ ] Prueba: el botón "Nuevo usuario" del listado abre el formulario.
+- [x] Crea `public/create.php`. Lógica arriba (aún vacía), luego `require` del header, el formulario y `require` del footer.
+- [x] Formulario `method="post" action="create.php"` con campos `name`, `last_name`, `email` (`type="email"`), `phone`; cada uno con `<label for>` enlazado al `id` del input, `maxlength` acorde a la tabla y `required` donde corresponda.
+- [x] Botones Guardar y Cancelar (enlace a `index.php`).
+- [x] Prueba: el botón "Nuevo usuario" del listado abre el formulario.
 
 **4.2.2 Recibir el POST y verlo**
 
-- [ ] Arriba: `if ($_SERVER['REQUEST_METHOD'] === 'POST') { ... }`. Dentro, haz un `var_dump($_POST); exit;` temporal.
-- [ ] Envía el formulario y observa `$_POST`. Fíjate en que las claves son los atributos `name` de los inputs.
-- [ ] Quita el `var_dump`.
+- [x] Arriba: `if ($_SERVER['REQUEST_METHOD'] === 'POST') { ... }`. Dentro, haz un `var_dump($_POST); exit;` temporal.
+- [x] Envía el formulario y observa `$_POST`. Fíjate en que las claves son los atributos `name` de los inputs.
+- [x] Quita el `var_dump`.
 
 **4.2.3 Limpiar los datos**
 
-- [ ] Prepara un arreglo `$data` con las 4 claves vacías (también sirve para rellenar el formulario la primera vez).
-- [ ] En el POST, recorre `$data` con `foreach` y reemplaza cada valor por `trim($_POST[$campo] ?? '')`. Entiende qué hace `trim` y por qué el `?? ''` evita una advertencia.
+- [x] Prepara un arreglo `$data` con las 4 claves vacías (también sirve para rellenar el formulario la primera vez).
+- [x] En el POST, recorre `$data` con `foreach` y reemplaza cada valor por `trim($_POST[$campo] ?? '')`. Entiende qué hace `trim` y por qué el `?? ''` evita una advertencia.
 
 **4.2.4 Validar**
 
-- [ ] Crea `$errors = []` al inicio.
-- [ ] Reglas (Guía §7.3): nombre y apellido no vacíos; correo con `filter_var($x, FILTER_VALIDATE_EMAIL)`; teléfono opcional pero, si viene, que cumpla la expresión regular de 7 a 20 caracteres entre dígitos, `+`, espacios y `-` (investiga `preg_match` y desglosa la regex carácter por carácter).
-- [ ] Cada fallo agrega un mensaje a `$errors`.
-- [ ] En el formulario, si `$errors` no está vacío, muéstralos en una lista dentro de un recuadro `.errores` (con `htmlspecialchars`).
-- [ ] Cada input debe conservar lo escrito: `value="<?= ... $data['name'] ... ?>"` (¿por qué escapado?).
-- [ ] Prueba: manda el formulario con campos vacíos, con correo malo y con teléfono `abc`. Los valores válidos se conservan.
-- [ ] **Experimento:** en el navegador (F12) quita el atributo `required` del input y envía vacío: la validación del servidor lo detiene. Ese es el motivo de validar en PHP.
+- [x] Crea `$errors = []` al inicio.
+- [x] Reglas (Guía §7.3): nombre y apellido no vacíos; correo con `filter_var($x, FILTER_VALIDATE_EMAIL)`; teléfono opcional pero, si viene, que cumpla la expresión regular de 7 a 20 caracteres entre dígitos, `+`, espacios y `-` (investiga `preg_match` y desglosa la regex carácter por carácter).
+- [x] Cada fallo agrega un mensaje a `$errors`.
+- [x] En el formulario, si `$errors` no está vacío, muéstralos en una lista dentro de un recuadro `.errores` (con `htmlspecialchars`).
+- [x] Cada input debe conservar lo escrito: `value="<?= ... $data['name'] ... ?>"` (¿por qué escapado?).
+- [x] Prueba: manda el formulario con campos vacíos, con correo malo y con teléfono `abc`. Los valores válidos se conservan.
+- [x] **Experimento:** en el navegador (F12) quita el atributo `required` del input y envía vacío: la validación del servidor lo detiene. Ese es el motivo de validar en PHP.
 
 **4.2.5 Insertar con consulta preparada**
 
-- [ ] Si `$errors` está vacío: `$pdo->prepare('INSERT INTO users (...) VALUES (:name, ...)')` y `execute([...])` con un arreglo de pares `:marcador => valor`.
-- [ ] Teléfono vacío debe guardarse como `null`, no como `''`. (Pista: operador ternario.)
-- [ ] Prueba: crea un usuario válido y mira en Adminer que se guardó. Crea otro sin teléfono y verifica que sea `NULL`.
-- [ ] **Experimento de seguridad:** crea un usuario con nombre `'; DROP TABLE users; --`. Comprueba que se guarda como texto y la tabla sigue viva. Explica por qué (los valores viajan separados de la estructura).
+- [x] Si `$errors` está vacío: `$pdo->prepare('INSERT INTO users (...) VALUES (:name, ...)')` y `execute([...])` con un arreglo de pares `:marcador => valor`.
+- [x] Teléfono vacío debe guardarse como `null`, no como `''`. (Pista: operador ternario.)
+- [x] Prueba: crea un usuario válido y mira en Adminer que se guardó. Crea otro sin teléfono y verifica que sea `NULL`.
+- [x] **Experimento de seguridad:** crea un usuario con nombre `'; DROP TABLE users; --`. Comprueba que se guarda como texto y la tabla sigue viva. Explica por qué (los valores viajan separados de la estructura).
 
 **4.2.6 Redirigir (PRG)**
 
-- [ ] Tras `execute`, `header('Location: index.php?msg=created'); exit;`
-- [ ] Prueba: tras guardar se ve el listado con el mensaje verde. Recarga (F5): **no** se crea un duplicado.
-- [ ] **Experimento:** quita temporalmente el `exit` y mira que el resto del script sigue ejecutándose. Entiende por qué es indispensable. Luego restáuralo.
-- [ ] Provoca el error clásico: pon texto antes de `<?php` (o un `echo` antes de `header()`) y lee "headers already sent". (Guía §10.)
+- [x] Tras `execute`, `header('Location: index.php?msg=created'); exit;`
+- [x] Prueba: tras guardar se ve el listado con el mensaje verde. Recarga (F5): **no** se crea un duplicado.
+- [x] **Experimento:** quita temporalmente el `exit` y mira que el resto del script sigue ejecutándose. Entiende por qué es indispensable. Luego restáuralo.
+- [x] Provoca el error clásico: pon texto antes de `<?php` (o un `echo` antes de `header()`) y lee "headers already sent". (Guía §10.)
 
 **4.2.7 Correo duplicado**
 
-- [ ] Envuelve el insert en `try/catch (PDOException $e)`.
-- [ ] Distingue el error: `$e->getCode() === '23000'` agrupa **cualquier** violación de integridad (UNIQUE 1062, NOT NULL 1048, ...). El número exacto está en `$e->errorInfo[1]`; decide cuál usar y por qué. Si es el duplicado, agrega "Ya existe un usuario con ese correo."; si es otro error, mensaje genérico y `log_exception(...)` (del MVP 2). (La guía muestra el detalle técnico; es útil en desarrollo, malo en producción: decide tú cómo manejarlo.)
-- [ ] Prueba: crea dos veces el mismo correo.
-- [ ] Piensa: ¿por qué es mejor capturar el 23000 que hacer primero un `SELECT` para ver si existe el correo? (pista: dos usuarios a la vez.)
+- [x] Envuelve el insert en `try/catch (PDOException $e)`.
+- [x] Distingue el error: `$e->getCode() === '23000'` agrupa **cualquier** violación de integridad (UNIQUE 1062, NOT NULL 1048, ...). El número exacto está en `$e->errorInfo[1]`; decide cuál usar y por qué. Si es el duplicado, agrega "Ya existe un usuario con ese correo."; si es otro error, mensaje genérico y `log_exception(...)` (del MVP 2). (La guía muestra el detalle técnico; es útil en desarrollo, malo en producción: decide tú cómo manejarlo.)
+- [x] Prueba: crea dos veces el mismo correo.
+- [x] Piensa: ¿por qué es mejor capturar el 23000 que hacer primero un `SELECT` para ver si existe el correo? (pista: dos usuarios a la vez.)
 
 ### 4.3 Probar (flujo completo, Guía §8.1)
 
-- [ ] Nuevo usuario válido → aparece primero en el listado con mensaje.
-- [ ] Campos inválidos → errores y datos conservados.
-- [ ] Correo repetido → mensaje claro.
-- [ ] F5 después de guardar no duplica.
-- [ ] Nombres con tildes/ñ se guardan y se ven bien.
+- [x] Nuevo usuario válido → aparece primero en el listado con mensaje.
+- [x] Campos inválidos → errores y datos conservados.
+- [x] Correo repetido → mensaje claro.
+- [x] F5 después de guardar no duplica.
+- [x] Nombres con tildes/ñ se guardan y se ven bien.
 - [ ] Commit.
 
 ### Preguntas de comprobación
 
-1. ¿Qué diferencia hay entre `prepare` y `execute`? ¿Qué ve MySQL en cada paso?
-2. ¿Qué pasa si falta `exit` tras `header('Location')`?
-3. ¿Por qué se valida en el servidor si ya hay `required` en el HTML?
-4. ¿Por qué el teléfono vacío se guarda como `NULL`?
-5. ¿Por qué la lógica va antes del `require` del header?
+1. ¿Qué diferencia hay entre `prepare` y `execute`? ¿Qué ve MySQL en cada paso? _En prepare() MySQL recibe solo la plantilla del SQL con marcadores (`INSERT INTO users (...) VALUES (:name, ...)`), sin ningún dato; la analiza y fija su estructura. En execute() recibe los valores por separado, como datos, y los coloca en los huecos sin volver a interpretarlos como SQL. Por eso un nombre como `'; DROP TABLE users; --` se guarda como texto y no cambia la consulta. Esto es real porque en connection.php está `PDO::ATTR_EMULATE_PREPARES => false`; con la emulación activada PDO sustituiría y escaparía los valores en el cliente. Si se concatenara el nombre en el SQL, los datos se mezclarían con el código antes de que MySQL lo lea y el usuario podría alterar la consulta (incluso un `O'Brien` legítimo la rompería)._
+2. ¿Qué pasa si falta `exit` tras `header('Location')`? _header() solo añade una cabecera a la respuesta, no detiene el script: PHP sigue ejecutando el resto. El navegador sigue la redirección, pero la respuesta también lleva el cuerpo con todo lo que se imprimió después, y cualquiera con curl lo puede leer. En una página protegida sin sesión eso filtra el contenido privado; además, el código siguiente (un INSERT, un borrado, un correo) se ejecuta igualmente. Lo probé con una página de prueba: la respuesta fue `302` con `Location: login.php` y, aun así, el cuerpo traía `DATOS SECRETOS`. Por eso siempre `exit;` justo después de `header('Location: ...')`._
+3. ¿Por qué se valida en el servidor si ya hay `required` en el HTML? _Porque los atributos HTML los controla el cliente y cualquiera puede saltárselos: quitando `required` con F12, cambiando el `type`, o enviando el POST directo con curl, Postman o un script, sin pasar por el formulario. El servidor no sabe de dónde vino la petición, así que solo lo que valida PHP cuenta. `required`, `type="email"` y `maxlength` se mantienen como comodidad para el usuario honesto, no como seguridad._
+4. ¿Por qué el teléfono vacío se guarda como `NULL`? _Porque el teléfono es opcional y `NULL` significa "no hay dato", mientras que `''` es un valor (una cadena vacía) que se confunde con un teléfono real. La columna es `DEFAULT NULL`, así que `NULL` es su forma natural de decir "sin teléfono". Además simplifica el resto: se consulta con `IS NULL`, y la vista muestra el guion con `$user['phone'] ?? "-"`, que solo reacciona ante `NULL` y no ante una cadena vacía. Se consigue con un ternario: `$data['phone'] !== '' ? $data['phone'] : null`._
+5. ¿Por qué la lógica va antes del `require` del header? _Porque header(), http_response_code() y las redirecciones modifican las cabeceras HTTP, y estas deben enviarse antes que el cuerpo. En cuanto PHP imprime el primer byte de HTML (el header del layout, o incluso un espacio o una línea en blanco), las cabeceras ya salieron y fallan con "headers already sent". Por eso create.php valida, guarda, fija el código de estado (422, 409, 503, 500) y redirige antes de hacer `require` del header; solo después se renderiza la vista. Es el mismo orden que usa index.php: primero la lógica y los errores, luego el HTML._
 
 ---
 

@@ -16,8 +16,9 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | MVP 1. Base de datos (`users`) | Hecho |
 | MVP 2. Conexión PDO y manejo de errores | Hecho |
 | MVP 3. Listar (Read) | Hecho |
-| MVP 4. Crear (Create) | Siguiente |
-| MVP 5 a 7. Update, Delete, revisión | Pendientes |
+| MVP 4. Crear (Create) | Hecho (pendiente commit) |
+| MVP 5. Editar (Update) | Siguiente |
+| MVP 6 y 7. Delete, revisión | Pendientes |
 | Mejoras 1 a 8 | Pendientes |
 
 ## Qué se construye
@@ -124,6 +125,7 @@ crud-usuarios-docker/
 └── src/                     # Montado en /var/www/html
     ├── public/              # Raíz web: lo único que ve el navegador
     │   ├── index.php        # Listado de usuarios (MVP 3)
+    │   ├── create.php       # Alta de usuarios (MVP 4)
     │   └── status.php       # Diagnóstico del stack (solo desarrollo)
     ├── includes/            # Código compartido, no accesible por URL
     │   ├── connection.php               # Crea $pdo (PDO)

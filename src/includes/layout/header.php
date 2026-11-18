@@ -7,7 +7,6 @@ require_once __DIR__ . '/../helpers.php';
 $page = $pageTitle ?? "Inicio";
 $title = "Gestión de usuarios | " . $page;
 ?>
-
 <!DOCTYPE html>
 <html lang="es">
 
@@ -27,4 +26,4 @@ $title = "Gestión de usuarios | " . $page;
             </div>
         </nav>
     </header>
-    <main class="container my-5">
+    <main class="container my-12 py-12">
