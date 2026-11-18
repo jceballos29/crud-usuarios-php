@@ -30,7 +30,7 @@ El texto que ve el usuario final sigue en español.
 | 0 | Entorno Docker corriendo | [x] |
 | 1 | Tabla `users` con datos de prueba | [x] |
 | 2 | PHP habla con MySQL y maneja errores | [x] |
-| 3 | Listado de usuarios (Read) | [ ] |
+| 3 | Listado de usuarios (Read) | [x] |
 | 4 | Crear usuario (Create) | [ ] |
 | 5 | Editar usuario (Update) | [ ] |
 | 6 | Eliminar usuario (Delete) | [ ] |
@@ -323,73 +323,73 @@ Se hace en sub-pasos pequeños; prueba en el navegador después de cada uno.
 
 Concepto: todas las páginas repiten el mismo inicio/fin de HTML. Se extrae a `header.php` y `footer.php` para no copiarlo en cada archivo. Van en `src/includes/layout/`.
 
-- [ ] `src/includes/layout/header.php`: `<!DOCTYPE html>`, `<html lang="es">`, `<head>` con `charset UTF-8`, `viewport`, `<title>`, enlace al CSS; abre `<body>`, un encabezado con el título del sitio y abre `<main>`.
-- [ ] `src/includes/layout/footer.php`: cierra `</main>`, `</body>`, `</html>`.
-- [ ] Ruta del CSS: usa `/css/style.css` (con barra inicial) para que funcione desde cualquier página. ¿Qué pasaría con `css/style.css` si luego una página estuviera en una subcarpeta?
-- [ ] `public/index.php` hoy es una página de bienvenida provisional: reemplázala. `require` de header, un texto de prueba, `require` de footer. Recarga y revisa el HTML generado con "Ver código fuente" (`Ctrl+U`): ¿ves PHP? (Guía §4.1: el navegador nunca ve el PHP).
+- [x] `src/includes/layout/header.php`: `<!DOCTYPE html>`, `<html lang="es">`, `<head>` con `charset UTF-8`, `viewport`, `<title>`, enlace al CSS; abre `<body>`, un encabezado con el título del sitio y abre `<main>`.
+- [x] `src/includes/layout/footer.php`: cierra `</main>`, `</body>`, `</html>`.
+- [x] Ruta del CSS: usa `/css/style.css` (con barra inicial) para que funcione desde cualquier página. ¿Qué pasaría con `css/style.css` si luego una página estuviera en una subcarpeta?
+- [x] `public/index.php` hoy es una página de bienvenida provisional: reemplázala. `require` de header, un texto de prueba, `require` de footer. Recarga y revisa el HTML generado con "Ver código fuente" (`Ctrl+U`): ¿ves PHP? (Guía §4.1: el navegador nunca ve el PHP).
 
 > Regla que vas a necesitar en Crear/Editar: **la lógica va antes del `require` del header**, porque `header()` (redirecciones) no funciona si ya se imprimió HTML.
 
 ### 3.2 Tabla con datos de verdad
 
-- [ ] Traslada el contenido de `test.php` a `index.php`. **Arriba**: `require_once` de `helpers.php` y `connection.php` y la consulta con `$pdo->query(...)->fetchAll()` a `$users`. Orden: `ORDER BY id DESC` (más nuevos primero).
-- [ ] Reutiliza el manejo de errores del MVP 2 (503 / 500 y `log_exception`). Observa que ese bloque se repetirá en cada página: es una pista para M8.
-- [ ] Debajo del header: título "Listado de usuarios" con el conteo `count($users)`.
-- [ ] Tabla con columnas ID, Nombre (nombre + apellido), Correo, Teléfono, Registro, Acciones.
-- [ ] Usa `foreach ($users as $u): ... endforeach;` (sintaxis alternativa para mezclar con HTML) y `<?= ... ?>` para imprimir.
-- [ ] Teléfono `NULL`: muestra `—` usando el operador `??`. Investiga qué hace `??`.
+- [x] Traslada el contenido de `test.php` a `index.php`. **Arriba**: `require_once` de `helpers.php` y `connection.php` y la consulta con `$pdo->query(...)->fetchAll()` a `$users`. Orden: `ORDER BY id DESC` (más nuevos primero).
+- [x] Reutiliza el manejo de errores del MVP 2 (503 / 500 y `log_exception`). Observa que ese bloque se repetirá en cada página: es una pista para M8.
+- [x] Debajo del header: título "Listado de usuarios" con el conteo `count($users)`.
+- [x] Tabla con columnas ID, Nombre (nombre + apellido), Correo, Teléfono, Registro, Acciones.
+- [x] Usa `foreach ($users as $u): ... endforeach;` (sintaxis alternativa para mezclar con HTML) y `<?= ... ?>` para imprimir.
+- [x] Teléfono `NULL`: muestra `—` usando el operador `??`. Investiga qué hace `??`.
 
 ### 3.3 Escapar la salida (seguridad: XSS)
 
-- [ ] Envuelve **cada** valor impreso en `htmlspecialchars()`.
-- [ ] **Experimento:** primero comprueba el ataque. Inserta desde Adminer un usuario con nombre `<script>alert(1)</script>`. Con `htmlspecialchars` quitado en esa celda, recarga: se ejecuta el script. Vuelve a ponerlo: se ve como texto. Mira el código fuente para ver las entidades (`&lt;`).
-- [ ] Borra ese usuario de prueba (hazlo con SQL en Adminer).
-- [ ] Ya tienes `escape()` en `includes/helpers.php` (flags `ENT_QUOTES | ENT_SUBSTITUTE`, `UTF-8`, y `(string)` para valores `int`/`null`). Úsala en cada valor del listado y explica cada flag.
+- [x] Envuelve **cada** valor impreso en `htmlspecialchars()`.
+- [x] **Experimento:** primero comprueba el ataque. Inserta desde Adminer un usuario con nombre `<script>alert(1)</script>`. Con `htmlspecialchars` quitado en esa celda, recarga: se ejecuta el script. Vuelve a ponerlo: se ve como texto. Mira el código fuente para ver las entidades (`&lt;`).
+- [x] Borra ese usuario de prueba (hazlo con SQL en Adminer).
+- [x] Ya tienes `escape()` en `includes/helpers.php` (flags `ENT_QUOTES | ENT_SUBSTITUTE`, `UTF-8`, y `(string)` para valores `int`/`null`). Úsala en cada valor del listado y explica cada flag.
 
 ### 3.4 Estado vacío
 
-- [ ] Si `$users` está vacío, muestra "No hay usuarios registrados." en vez de la tabla (usa `empty()` o `count()`).
-- [ ] Pruébalo vaciando la tabla en Adminer (`TRUNCATE users` o DELETE) y vuelve a cargar el seed con `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/02-seed.sql`.
+- [x] Si `$users` está vacío, muestra "No hay usuarios registrados." en vez de la tabla (usa `empty()` o `count()`).
+- [x] Pruébalo vaciando la tabla en Adminer (`TRUNCATE users` o DELETE) y vuelve a cargar el seed con `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/02-seed.sql`.
 
 ### 3.5 Mensajes de confirmación por URL
 
 Concepto: las demás páginas redirigirán a `index.php?msg=created`. El listado mostrará un aviso.
 
-- [ ] Define un arreglo asociativo `$mensajes` con las claves permitidas (`created`, `updated`, `deleted`) y su texto.
-- [ ] Lee `$_GET['msg'] ?? ''`.
-- [ ] Muestra el mensaje **solo si la clave existe** en `$mensajes`. Pruébalo: `/?msg=created` muestra el aviso; `/?msg=<b>hola</b>` no muestra nada. Pregúntate por qué esa lista blanca es más segura que imprimir `$_GET['msg']` directo.
+- [x] Define un arreglo asociativo `$mensajes` con las claves permitidas (`created`, `updated`, `deleted`) y su texto.
+- [x] Lee `$_GET['msg'] ?? ''`.
+- [x] Muestra el mensaje **solo si la clave existe** en `$mensajes`. Pruébalo: `/?msg=created` muestra el aviso; `/?msg=<b>hola</b>` no muestra nada. Pregúntate por qué esa lista blanca es más segura que imprimir `$_GET['msg']` directo.
 
 ### 3.6 Estilos (`public/css/style.css`)
 
 El CSS no es el foco del curso. Clases que usa la guía (§7.7): `.contenedor`, `.btn`, `.btn-claro`, `.btn-sm`, `.mensaje`, `.errores`, `.formulario`, `.campo`, `.vacio`.
 
-- [ ] Decisión actual: Bootstrap 5 por CDN (en `header.php`). Compromisos: depende de internet y de un tercero; investiga el atributo `integrity` (SRI) en las etiquetas `<link>`/`<script>` para verificar que el archivo no fue alterado.
+- [x] Decisión actual: Bootstrap 6.0.0-alpha.1 (CSS y JS) + Bootstrap Icons por CDN (en `header.php`). Compromisos: depende de internet y de un tercero; investiga el atributo `integrity` (SRI) en las etiquetas `<link>`/`<script>` para verificar que el archivo no fue alterado.
 - [ ] Opcional: CSS propio en `public/css/style.css` (estilo de la guía: blanco y negro, Arial). Si lo haces, verifica que Nginx lo sirve: http://localhost:8080/css/style.css.
 
 ### 3.7 Botones (aún sin función)
 
-- [ ] Enlace "Nuevo usuario" → `create.php`.
-- [ ] En cada fila: enlace "Editar" → `edit.php?id=<id>`.
-- [ ] En cada fila: **formulario** `method="post" action="delete.php"` con `<input type="hidden" name="id">` y botón "Eliminar". Añade `onsubmit="return confirm('¿Eliminar este usuario?');"`.
-- [ ] Pregunta: ¿por qué Eliminar es un formulario POST y no un enlace como Editar? (se explica en MVP 6, ve pensándolo).
+- [x] Enlace "Nuevo usuario" → `create.php`.
+- [x] En cada fila: enlace "Editar" → `edit.php?id=<id>`.
+- [x] En cada fila: **formulario** `method="post" action="delete.php"` con `<input type="hidden" name="id">` y botón "Eliminar". Añade `onsubmit="return confirm('¿Eliminar este usuario?');"`.
+- [x] Pregunta: ¿por qué Eliminar es un formulario POST y no un enlace como Editar? (se explica en MVP 6, ve pensándolo).
 
 ### 3.8 Probar
 
-- [ ] Muestra los 3 usuarios con el más nuevo primero.
-- [ ] El teléfono NULL se ve como `—`.
-- [ ] `/?msg=created` muestra el mensaje; un valor raro no muestra nada.
-- [ ] `<script>` en un nombre NO se ejecuta.
-- [ ] Tabla vacía muestra "No hay usuarios registrados."
-- [ ] Hay estilos aplicados.
-- [ ] Borra `test.php` (su contenido ya está en `index.php`).
+- [x] Muestra los 3 usuarios con el más nuevo primero.
+- [x] El teléfono NULL se ve como `—`.
+- [x] `/?msg=created` muestra el mensaje; un valor raro no muestra nada.
+- [x] `<script>` en un nombre NO se ejecuta.
+- [x] Tabla vacía muestra "No hay usuarios registrados."
+- [x] Hay estilos aplicados.
+- [x] Borra `test.php` (su contenido ya está en `index.php`).
 - [ ] Commit.
 
 ### Preguntas de comprobación
 
-1. ¿Qué es XSS y qué función lo evita? ¿Dónde se aplica: al guardar o al mostrar?
-2. ¿Por qué `query()` es seguro aquí sin consulta preparada? ¿Cuándo dejaría de serlo?
-3. ¿Qué hace `<?= ?>`?
-4. ¿Por qué `$mensajes[$msg]` en vez de imprimir `$msg`?
+1. ¿Qué es XSS y qué función lo evita? ¿Dónde se aplica: al guardar o al mostrar? _XSS (Cross-Site Scripting) es cuando un atacante consigue que se ejecute su código JavaScript en el navegador de otra persona. Eso pasa si la página imprime datos externos sin escapar. Se evita con htmlspecialchars(), que en tu proyecto está envuelta en escape(). Se aplica al mostrar, no al guardar._
+2. ¿Por qué `query()` es seguro aquí sin consulta preparada? ¿Cuándo dejaría de serlo? _Es seguro porque la consulta es un texto fijo, sin ningún dato del usuario (SELECT ... FROM users ORDER BY id DESC). Dejaría de serlo en cuanto se concatene o interpole un valor externo en el SQL, como `$_GET['id']`, un filtro de búsqueda o un orden elegido por el usuario. En ese caso hay que usar prepare() con parámetros._
+3. ¿Qué hace `<?= ?>`? _Es la forma corta de <?php echo ... ?>. Evalúa la expresión y la imprime en el HTML._
+4. ¿Por qué `$mensajes[$msg]` en vez de imprimir `$msg`? _Porque msg viene de la URL y cualquiera puede escribir lo que quiera. Con un mapa de mensajes fijos, el usuario solo elige una clave y el texto que se muestra lo decide el servidor. Así nadie puede inyectar contenido propio en la página._
 
 ---
 
@@ -799,13 +799,14 @@ crud-usuarios-docker/
 │   └── 02-seed.sql            # SET NAMES utf8mb4 + 3 usuarios
 └── src/
     ├── public/                # SOLO lo que el navegador puede pedir
-    │   ├── index.php          # provisional: se reemplaza en el MVP 3
-    │   ├── status.php         # diagnóstico del stack (solo desarrollo)
-    │   └── test.php           # prueba temporal: se borra en el MVP 3
+    │   ├── index.php          # listado de usuarios (MVP 3)
+    │   └── status.php         # diagnóstico del stack (solo desarrollo)
     ├── includes/              # código PHP compartido (no accesible por URL)
     │   ├── connection.php
-    │   ├── helpers.php        # escape(), log_exception()
-    │   └── DatabaseConnectionException.php
+    │   ├── helpers.php        # environment(), escape(), log_exception()
+    │   ├── DatabaseConnectionException.php
+    │   ├── layout/            # header.php, footer.php
+    │   └── partials/          # trozos de vista reutilizables (users-list.php)
     └── scripts/               # solo consola
         ├── db-check.php
         └── info.php

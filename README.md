@@ -14,9 +14,10 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 |------|--------|
 | 0. Entorno Docker | Hecha |
 | MVP 1. Base de datos (`users`) | Hecho |
-| MVP 2. Conexión PDO y manejo de errores | Hecho (pendiente commit) |
-| MVP 3. Listar (Read) | Siguiente |
-| MVP 4 a 7. Create, Update, Delete, revisión | Pendientes |
+| MVP 2. Conexión PDO y manejo de errores | Hecho |
+| MVP 3. Listar (Read) | Hecho |
+| MVP 4. Crear (Create) | Siguiente |
+| MVP 5 a 7. Update, Delete, revisión | Pendientes |
 | Mejoras 1 a 8 | Pendientes |
 
 ## Qué se construye
@@ -122,13 +123,14 @@ crud-usuarios-docker/
 │   └── 02-seed.sql          # SET NAMES utf8mb4 + 3 usuarios de prueba
 └── src/                     # Montado en /var/www/html
     ├── public/              # Raíz web: lo único que ve el navegador
-    │   ├── index.php        # (provisional; será el listado, MVP 3)
-    │   ├── status.php       # Diagnóstico del stack (solo desarrollo)
-    │   └── test.php         # Prueba temporal del MVP 2
+    │   ├── index.php        # Listado de usuarios (MVP 3)
+    │   └── status.php       # Diagnóstico del stack (solo desarrollo)
     ├── includes/            # Código compartido, no accesible por URL
     │   ├── connection.php               # Crea $pdo (PDO)
-    │   ├── helpers.php                  # escape(), log_exception()
-    │   └── DatabaseConnectionException.php
+    │   ├── helpers.php                  # environment(), escape(), log_exception()
+    │   ├── DatabaseConnectionException.php
+    │   ├── layout/                      # header.php, footer.php
+    │   └── partials/                    # users-list.php (vista del listado)
     └── scripts/             # Solo consola
         ├── db-check.php
         └── info.php
