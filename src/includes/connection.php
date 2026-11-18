@@ -16,6 +16,10 @@ $options = [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     PDO::ATTR_EMULATE_PREPARES => false,
+    // rowCount() de un UPDATE cuenta las filas que coinciden con el WHERE, no solo las que cambian
+    // de valor. Sin esto, guardar sin modificar nada daría 0, igual que un id que no existe.
+    // Pdo\Mysql existe desde PHP 8.4; PDO::MYSQL_ATTR_FOUND_ROWS está obsoleta desde PHP 8.5.
+    Pdo\Mysql::ATTR_FOUND_ROWS => true,
 ];
 
 try {
