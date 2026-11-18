@@ -466,7 +466,27 @@ Se construye en capas; no escribas todo de golpe.
 - [x] Correo repetido → mensaje claro.
 - [x] F5 después de guardar no duplica.
 - [x] Nombres con tildes/ñ se guardan y se ven bien.
-- [ ] Commit.
+- [x] Commit.
+
+### 4.4 Línea base de respuestas de `create.php`
+
+Medido con `curl -i` contra `http://localhost:8080/create.php`. Sirve de referencia para la **prueba de no regresión** del refactor del MVP 5 (5.2.0): después de compartir código, `create.php` debe responder igual.
+
+| # | Caso | Código esperado | Código obtenido | Qué se ve |
+|---|---|---|---|---|
+| 1 | GET | 200 | **200 OK** | Formulario vacío |
+| 2 | POST vacío | 422 | **422** | Errores en nombre, apellido y email |
+| 3 | Teléfono inválido (`-------`) | 422 | **422** | "El teléfono debe tener entre 7 y 15 dígitos." |
+| 4 | Correo duplicado | 409 | **409 Conflict** | "Ya existe un usuario registrado con ese correo." bajo el campo Email |
+| 5 | POST válido | 302 | **302 Found** | `Location: index.php?msg=created` |
+| 6 | BD detenida | 503 | **503 Service Unavailable** | "No se pudo conectar a la base de datos. Inténtalo más tarde." |
+
+Regla de códigos: si el envío no se completó, nunca es 200. **422** = datos inválidos, **409** = chocan con lo ya guardado (email duplicado), **5xx** = fallo del servidor (503 sin conexión, 500 error de consulta o inesperado).
+
+Notas:
+- En los 422, `curl` muestra `HTTP/1.1 422 ` sin texto de razón: PHP no lo añade para ese código. Es válido.
+- El caso 5 crea un usuario real: borra la fila de prueba después. El caso 6 se prueba parando el contenedor (`docker compose stop db`) y levantándolo de nuevo (`docker compose start db`).
+- Con la BD detenida, `index.php` también responde 503.
 
 ### Preguntas de comprobación
 
@@ -490,7 +510,23 @@ Se construye en capas; no escribas todo de golpe.
 
 ### 5.2 Paso a paso
 
-- [ ] Duplica mentalmente el flujo de `create.php` (no copies a ciegas: escríbelo, reutilizando lo que entiendes).
+**5.2.0 Refactor previo: compartir lo común (decidido al empezar el MVP 5)**
+
+Antes de escribir `edit.php`, sacar de `create.php` lo que va a repetirse. Regla: lo que no toca la BD se comparte; lo que toca la BD se queda en cada página.
+
+- [x] Compartir: la definición de campos, la validación y el dibujo del formulario (nombres de archivos y funciones: decide tú, en `src/includes/`).
+- [x] Se queda en cada página: conexión, `INSERT`/`UPDATE`, códigos HTTP del guardado y redirección.
+- [x] **Prueba de no regresión:** `create.php` se comporta **igual** que antes (mismos mensajes, mismos códigos 200/422/409/503, mismos datos conservados).
+- [ ] Commit del refactor, aparte del resto del MVP.
+
+**Preguntas de diseño del refactor (responder antes de escribir código)**
+
+1. ¿Qué necesita la validación como entrada y qué devuelve? ¿Lee `$_POST` por dentro o recibe un arreglo? _Conviene que reciba un arreglo y que no toque la superglobal. Entrada: los valores crudos como arreglo (`$_POST` en la página, pero podría ser cualquier otro) y la definición de campos. Salida: los datos ya limpios (`trim`, email en minúsculas, valores no string tratados como vacío) y el arreglo `$errors` (campo => mensaje). Así es una función pura: mismo arreglo de entrada, mismo resultado, sin depender de una petición HTTP, y se prueba con arreglos literales (`validate_user(['name' => '', ...])`) sin navegador ni formulario. Además la página decide de dónde salen los datos: en edit.php el GET rellena `$data` desde la BD y el POST desde lo enviado, y la validación no tiene que enterarse. Lo que hoy es el `foreach` con `trim($_POST[$campo] ?? '')` pasa a ser una función que recibe `$source` en vez de leer `$_POST`._
+2. ¿Qué parte de "correo duplicado" pertenece a la validación y cuál a la BD? ¿La regla distinta de edit.php confirma dónde debe vivir? _A la validación le toca todo lo que se decide con los datos enviados y nada más: obligatorio, longitud, formato. A la BD le toca el duplicado, porque depende del estado de la tabla y solo el `UNIQUE` lo comprueba de forma atómica (ver 4.2.7: un `SELECT` previo tiene la carrera de dos peticiones simultáneas). Sí, edit.php lo confirma: si el duplicado viviera en la validación como un `SELECT ... WHERE email = :email`, edit.php necesitaría `AND id <> :id` para no chocar consigo mismo, y la validación tendría que conocer el id y tener acceso a la BD (dejaría de ser pura). Con el `UNIQUE` no hay nada que cambiar: un `UPDATE` que deja el correo igual en su propia fila no viola el índice, y si el correo es de otro usuario salta el 1062, que cada página traduce a su mensaje ("ya existe un usuario con ese correo" en create, "otro usuario" en edit). Por eso la comprobación se queda en cada página, junto al `INSERT`/`UPDATE`, tal como dice la regla de 5.2.0._
+3. El formulario necesita la URL de destino, el texto del botón y si lleva un `id` oculto. ¿Cómo se le pasa esa información al archivo compartido? _Como variables que la página define justo antes del `require`, documentadas en un docblock `@var` al inicio del parcial, igual que `partials/users-list.php`. Propuesta: `$fields` (definición de campos), `$data` (valores a pintar), `$errors`, `$action` (URL de destino, `create.php` o `edit.php`), `$submitLabel` ("Registrar" o "Actualizar") y `$userId` (`int|null`: si no es `null`, el parcial pinta `<input type="hidden" name="id">`; en create vale `null`). Todo lo que cambia entre páginas entra por esas variables y el parcial no pregunta en qué página está. La alternativa sería una función `render_user_form(array $options)` con parámetros explícitos: es más estricta y no depende del ámbito, pero el precedente del proyecto es el parcial con variables, y el docblock `@var` también apaga los avisos del IDE (`Undefined variable`)._
+4. ¿Dónde viven los archivos nuevos? ¿Una función con la lógica es una "vista parcial"? _Propuesta: la lógica (definición de campos, lectura/limpieza del arreglo y validación) va en `includes/user-validation.php`, junto a `helpers.php` y `connection.php`: son funciones de PHP puro, sin HTML y sin BD (las funciones y datos del dominio). El dibujo del formulario va en `includes/partials/user-form.php`, porque es un fragmento de HTML que lee variables, como `users-list.php`. `includes/layout/` se queda solo con el marco de la página (`header.php` y `footer.php`). No, una función con lógica no es una vista parcial: la función recibe parámetros, devuelve valores, no imprime nada y se puede probar sola; el parcial imprime HTML y toma las variables del ámbito de quien lo incluye, y se prueba mirando el resultado. Mezclarlos haría que cambiar un mensaje de error obligue a tocar HTML, o que cambiar el HTML pueda romper la validación. La regla práctica para ubicar un archivo es: ¿devuelve un valor? va en `includes/`; ¿pinta HTML de una zona de la página? va en `partials/`; ¿es el marco común de todas las páginas? va en `layout/`._
+
+- [ ] Reutiliza lo compartido en 5.2.0; no copies `create.php`.
 - [ ] **Identificar:** el `id` llega por la URL (GET, al abrir) o por un campo oculto (POST, al enviar). Léelo con `$_GET['id'] ?? $_POST['id'] ?? null` y valídalo con `filter_var(..., FILTER_VALIDATE_INT)`. Si no es válido: redirige al listado y `exit`.
 - [ ] **Cargar:** `SELECT` preparado `WHERE id = :id` + `fetch()`. Si devuelve `false` (no existe), redirige al listado.
 - [ ] **Rellenar:** la primera vez (GET), `$data` se llena con lo cargado de la BD. Si hay POST, se llena con lo enviado.
@@ -498,7 +534,7 @@ Se construye en capas; no escribas todo de golpe.
 - [ ] **UPDATE:** `UPDATE users SET nombre = :name, ... WHERE id = :id`, con `execute` (ahora son 5 parámetros).
 - [ ] Correo duplicado: el mismo `catch` 23000 con mensaje "otro usuario". Piensa por qué guardar sin cambiar el correo **no** da error (el registro no choca consigo mismo).
 - [ ] Redirige a `index.php?msg=updated` con `exit`.
-- [ ] Reflexión sobre duplicación de código: `create.php` y `edit.php` repiten validación. Anótalo; lo mejoraremos en M8.
+- [ ] Reflexión: ¿qué quedó repetido aun después del refactor (el patrón `try/catch` de errores, por ejemplo)? Anótalo; lo mejoraremos en M8.
 
 ### 5.3 Pruebas
 
