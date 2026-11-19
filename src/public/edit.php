@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/request-guard.php';
+require_once __DIR__ . '/../includes/user-conflict.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
 
@@ -56,9 +57,9 @@ if (!$notFound) {
         require_once __DIR__ . '/../includes/connection.php';
 
         // Cargar (también al enviar el POST: un usuario borrado entre tanto debe dar 404).
-        $stmt = $pdo->prepare('SELECT name, last_name, email, phone, document, birth_date, role FROM users WHERE id = :id');
+        $stmt = $pdo->prepare('SELECT name, last_name, email, phone, document, birth_date, role FROM users WHERE id = :id AND active = 1');
         $stmt->execute([':id' => $userId]);
-        $user = $stmt->fetch(); // false si no hay fila
+        $user = $stmt->fetch(); // false si no hay fila (o si el usuario está eliminado: no se edita, se restaura)
 
         if ($user === false) {
             $notFound = true;
@@ -77,7 +78,7 @@ if (!$notFound) {
                 $errors = validate_user($data, $fields);
 
                 if ($errors === []) {
-                    $sql = 'UPDATE users SET name = :name, last_name = :last_name, email = :email, phone = :phone, document = :document, birth_date = :birth_date, role = :role WHERE id = :id';
+                    $sql = 'UPDATE users SET name = :name, last_name = :last_name, email = :email, phone = :phone, document = :document, birth_date = :birth_date, role = :role WHERE id = :id AND active = 1';
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute(user_db_params($data) + [':id' => $userId]);
 
@@ -110,9 +111,7 @@ if (!$notFound) {
 
         if ($duplicate !== null) {
             http_response_code(409);
-            $errors[$duplicate] = $duplicate === 'email'
-                ? 'Ya existe otro usuario registrado con ese correo.'
-                : 'Ya existe otro usuario registrado con ese documento.';
+            $errors[$duplicate] = duplicate_message($duplicate, true, conflicting_user_is_inactive($pdo, $duplicate, $data[$duplicate]));
         } else {
             [$status, $errorMessage] = describe_failure($error, 'No se pudo completar la operación. Inténtalo más tarde.');
             http_response_code($status);

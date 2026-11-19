@@ -73,13 +73,20 @@ function like_pattern(string $term): string
  * que el visitante teclea llega al texto de la consulta. MySQL ignora mayúsculas y tildes en
  * `utf8mb4_unicode_ci`, de modo que "gomez" encuentra a "Gómez".
  *
- * @param string $term Término ya limpio con parse_search_term(), o '' para no filtrar.
- * @return array{0: string, 1: array<string, string>} [condición (vacía o " WHERE ..."), parámetros]
+ * Todas las consultas filtran por `active` (borrado lógico, M4): un usuario eliminado no cuenta, no se
+ * lista y no se encuentra, salvo en la vista de eliminados. `active` va como marcador (un entero), igual
+ * que el texto buscado: aquí tampoco se escribe en el SQL nada que venga de fuera.
+ *
+ * @param string $term Término ya limpio con parse_search_term(), o '' para no filtrar por texto.
+ * @param bool $active true = usuarios visibles; false = los eliminados.
+ * @return array{0: string, 1: array<string, string|int>} [condición " WHERE ...", parámetros]
  */
-function user_search_where(string $term): array
+function user_search_where(string $term, bool $active = true): array
 {
+    $activeParam = [':active' => $active ? 1 : 0];
+
     if ($term === '') {
-        return ['', []];
+        return [' WHERE active = :active', $activeParam];
     }
 
     $searchable = ['name', 'last_name', "CONCAT(name, ' ', last_name)", 'email', 'phone', 'document'];
@@ -92,7 +99,7 @@ function user_search_where(string $term): array
         $params[":q$index"] = $pattern;
     }
 
-    return [' WHERE ' . implode(' OR ', $conditions), $params];
+    return [' WHERE active = :active AND (' . implode(' OR ', $conditions) . ')', $activeParam + $params];
 }
 
 /**
@@ -100,11 +107,12 @@ function user_search_where(string $term): array
  * para saber cuántas páginas hay; no se puede deducir de la página que se pide.
  *
  * @param string $term Término ya limpio con parse_search_term(), o ''.
- * @return array{0: string, 1: array<string, string>} [consulta SQL, parámetros]
+ * @param bool $active true = usuarios visibles; false = los eliminados.
+ * @return array{0: string, 1: array<string, string|int>} [consulta SQL, parámetros]
  */
-function user_count_query(string $term): array
+function user_count_query(string $term, bool $active = true): array
 {
-    [$where, $params] = user_search_where($term);
+    [$where, $params] = user_search_where($term, $active);
 
     return ['SELECT COUNT(*) FROM users' . $where, $params];
 }
@@ -123,11 +131,12 @@ function user_count_query(string $term): array
  * @param string $term Término ya limpio con parse_search_term(), o ''.
  * @param int $limit Filas por página.
  * @param int $offset Filas que se saltan: (página - 1) * filas por página.
+ * @param bool $active true = usuarios visibles; false = los eliminados.
  * @return array{0: string, 1: array<string, string|int>} [consulta SQL, parámetros para bind_all()]
  */
-function user_list_query(string $term, int $limit, int $offset): array
+function user_list_query(string $term, int $limit, int $offset, bool $active = true): array
 {
-    [$where, $params] = user_search_where($term);
+    [$where, $params] = user_search_where($term, $active);
 
     $sql = 'SELECT id, name, last_name, email, phone, document, birth_date, role, created_at FROM users' . $where
         . ' ORDER BY id DESC LIMIT :limit OFFSET :offset';

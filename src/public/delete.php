@@ -8,7 +8,7 @@ require_once __DIR__ . '/../includes/request-guard.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
 
-// delete.php solo atiende POST y casi nunca muestra pantalla: borra y redirige.
+// delete.php solo atiende POST y casi nunca muestra pantalla: elimina (lógicamente) y redirige.
 // Cualquier otro método (GET al escribir la URL, PUT, DELETE...) recibe 405 y no se toca nada.
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -41,10 +41,12 @@ try {
 
     require_once __DIR__ . '/../includes/connection.php';
 
-    $stmt = $pdo->prepare('DELETE FROM users WHERE id = :id');
+    // Borrado lógico (M4): la fila se conserva y solo deja de verse. `AND active = 1` hace que borrar a
+    // alguien que ya estaba eliminado no cuente como una eliminación (rowCount() = 0 -> "missing").
+    $stmt = $pdo->prepare('UPDATE users SET active = 0 WHERE id = :id AND active = 1');
     $stmt->execute([':id' => $userId]);
 
-    // Borrar es idempotente: si el usuario ya no existía, el estado deseado ya se cumple y no es
+    // Eliminar es idempotente: si el usuario ya no existía (o ya estaba eliminado), el estado deseado ya se cumple y no es
     // un error. Pero no se dice "eliminado" si esta petición no eliminó nada.
     // (rowCount() cuenta las filas encontradas: connection.php activa Pdo\Mysql::ATTR_FOUND_ROWS.)
     $result = $stmt->rowCount() > 0 ? 'deleted' : 'missing';

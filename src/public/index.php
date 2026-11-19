@@ -18,12 +18,16 @@ $search = parse_search_term($_GET['q'] ?? null);
 $requestedPage = parse_page($_GET['page'] ?? null);
 $pagination = paginate(0, $requestedPage);
 
+// Vista (M4): GET ?view=inactive muestra a los eliminados (borrado lógico); cualquier otro valor, a los visibles.
+$view = parse_view($_GET['view'] ?? null);
+$showActive = $view === VIEW_ACTIVE;
+
 try {
     require_once __DIR__ . '/../includes/connection.php';
     // Las consultas son siempre preparadas: el texto buscado viaja como dato (con los comodines
     // escapados) y LIMIT/OFFSET como enteros, nunca dentro del SQL. Ver includes/user-search.php.
     // Primero se cuenta (con el mismo filtro) para saber cuántas páginas hay; después se pide UNA página.
-    [$countSql, $countParams] = user_count_query($search);
+    [$countSql, $countParams] = user_count_query($search, $showActive);
     $stmt = $pdo->prepare($countSql);
     bind_all($stmt, $countParams);
     $stmt->execute();
@@ -31,7 +35,7 @@ try {
     // paginate() corrige la página si se pasó del rango: ?page=999 muestra la última, no una vacía.
     $pagination = paginate((int) $stmt->fetchColumn(), $requestedPage);
 
-    [$sql, $params] = user_list_query($search, $pagination['perPage'], $pagination['offset']);
+    [$sql, $params] = user_list_query($search, $pagination['perPage'], $pagination['offset'], $showActive);
     $stmt = $pdo->prepare($sql);
     bind_all($stmt, $params);
     $stmt->execute();
@@ -44,13 +48,16 @@ try {
 $messages = [
     "created" => "El usuario ha sido registrado exitosamente.",
     "updated" => "El usuario ha sido actualizado exitosamente.",
-    "deleted" => "El usuario ha sido eliminado exitosamente.",
-    "missing" => "El usuario ya no existía, no se eliminó nada."
+    "deleted" => "El usuario ha sido eliminado exitosamente. Puedes restaurarlo desde «Eliminados».",
+    "missing" => "El usuario ya no existía, no se eliminó nada.",
+    "restored" => "El usuario ha sido restaurado exitosamente.",
+    "not_restored" => "El usuario no estaba eliminado, no se restauró nada."
 ];
 
 // Tipo de aviso (clase theme-*). Solo se listan las excepciones: lo demás es un éxito.
 $messageTypes = [
     "missing" => "info", // no es un éxito ni un error: el estado deseado ya se cumplía
+    "not_restored" => "info",
 ];
 
 // Si hubo un error, no se muestra ningún mensaje de éxito.

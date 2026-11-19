@@ -18,6 +18,7 @@ require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/origin.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
+require_once __DIR__ . '/../includes/user-conflict.php';
 
 require_once __DIR__ . '/harness.php';
 
@@ -208,26 +209,31 @@ same('vacío', '%%', like_pattern(''));
 same('los %, _ y \\ de cada extremo también se escapan', '%\\%x\\_\\\\%', like_pattern('%x_\\'));
 
 section('user_search_where() y user_count_query(): el mismo filtro para listar y para contar');
-same('sin búsqueda: ni condición ni parámetros', ['', []], user_search_where(''));
-same('recuento sin búsqueda', ['SELECT COUNT(*) FROM users', []], user_count_query(''));
+same('sin búsqueda: solo el filtro de usuarios visibles', [' WHERE active = :active', [':active' => 1]], user_search_where(''));
+same('sin búsqueda, vista de eliminados', [' WHERE active = :active', [':active' => 0]], user_search_where('', false));
+same('con búsqueda: active va FUERA del paréntesis del OR (si no, un eliminado que case se colaría)', true, str_starts_with(user_search_where('x')[0], ' WHERE active = :active AND (') && str_ends_with(user_search_where('x')[0], ')'));
+same('con búsqueda: :active es un entero (bind_all lo enlaza con PARAM_INT)', true, is_int(user_search_where('x')[1][':active']));
+same('recuento sin búsqueda', ['SELECT COUNT(*) FROM users WHERE active = :active', [':active' => 1]], user_count_query(''));
+same('recuento de eliminados', [':active' => 0], user_count_query('', false)[1]);
 [$countSql, $countParams] = user_count_query('laura');
 preg_match_all('/:q\d+/', $countSql, $countMarkers);
 same('recuento con búsqueda: 6 marcadores distintos', [6, 6], [count($countMarkers[0]), count(array_unique($countMarkers[0]))]);
-same('el recuento empieza por SELECT COUNT(*) y lleva el WHERE', true, str_starts_with($countSql, 'SELECT COUNT(*) FROM users WHERE '));
+same('el recuento empieza por SELECT COUNT(*) y lleva el WHERE', true, str_starts_with($countSql, 'SELECT COUNT(*) FROM users WHERE active = :active AND ('));
 same('el recuento no lleva ORDER BY ni LIMIT (no hacen falta para contar)', false, str_contains($countSql, 'ORDER BY') || str_contains($countSql, 'LIMIT'));
 
 section('user_list_query(): una página, marcadores distintos y nada del visitante dentro del SQL');
 [$allSql, $allParams] = user_list_query('', 10, 0);
-same('sin búsqueda: solo los parámetros de la página', [':limit' => 10, ':offset' => 0], $allParams);
-same('sin búsqueda: sin WHERE', false, str_contains($allSql, 'WHERE'));
+same('sin búsqueda: active y los parámetros de la página', [':active' => 1, ':limit' => 10, ':offset' => 0], $allParams);
+same('la vista de eliminados pide active = 0', 0, user_list_query('', 10, 0, false)[1][':active']);
+same('sin búsqueda: el único filtro es active', true, str_contains($allSql, ' WHERE active = :active ORDER BY'));
 same('ordena por id descendente y pagina', true, str_ends_with($allSql, 'ORDER BY id DESC LIMIT :limit OFFSET :offset'));
 same('LIMIT y OFFSET son enteros de PHP (bind_all los enlaza con PARAM_INT)', [true, true], [is_int($allParams[':limit']), is_int($allParams[':offset'])]);
 [$sql, $params] = user_list_query('laura', 10, 20);
 preg_match_all('/:q\d+/', $sql, $matches);
 same('con búsqueda: 6 marcadores de columna', 6, count($matches[0]));
 same('con búsqueda: NINGÚN marcador repetido (si no, HY093 con prepares reales)', count($matches[0]), count(array_unique($matches[0])));
-same('los parámetros son exactamente esos marcadores más :limit y :offset', [...array_unique($matches[0]), ':limit', ':offset'], array_keys($params));
-same('los 5 de la búsqueda reciben el mismo patrón', ['%laura%'], array_values(array_unique(array_slice($params, 0, 6))));
+same('los parámetros son exactamente esos marcadores más :limit y :offset', [':active', ...array_unique($matches[0]), ':limit', ':offset'], array_keys($params));
+same('los 5 de la búsqueda reciben el mismo patrón', ['%laura%'], array_values(array_unique(array_slice($params, 1, 6))));
 same('LIMIT y OFFSET llegan tal cual', [10, 20], [$params[':limit'], $params[':offset']]);
 same('busca en el nombre completo ("Laura Gómez")', true, str_contains($sql, "CONCAT(name, ' ', last_name) LIKE"));
 same('busca en el correo y en el teléfono', true, str_contains($sql, 'email LIKE') && str_contains($sql, 'phone LIKE'));
@@ -418,5 +424,31 @@ same('documento', 'document', duplicate_user_field("Duplicate entry 'AB12345' fo
 same('sin el prefijo de tabla (MySQL 5.7 / MariaDB)', 'document', duplicate_user_field("Duplicate entry 'x' for key 'unique_document'"));
 same('una clave desconocida', null, duplicate_user_field("Duplicate entry '3' for key 'users.PRIMARY'"));
 same('un mensaje que no es de duplicado', null, duplicate_user_field('Connection refused'));
+
+section('Mejora 4: parse_view() y la vista en la URL del listado');
+same('«inactive» pide los eliminados', VIEW_INACTIVE, parse_view('inactive'));
+foreach (['active', '', 'INACTIVE', 'Inactive', ' inactive', 'inactive ', '1', 'deleted', 'all'] as $raw) {
+    same(var_export($raw, true) . ' es la vista normal', VIEW_ACTIVE, parse_view($raw));
+}
+same('null (no llegó)', VIEW_ACTIVE, parse_view(null));
+same('un arreglo (?view[]=inactive)', VIEW_ACTIVE, parse_view(['inactive']));
+same('un bool', VIEW_ACTIVE, parse_view(true));
+same('la vista normal se omite del estado', [], list_state('', 1, VIEW_ACTIVE));
+same('la vista de eliminados va en el estado', ['view' => 'inactive'], list_state('', 1, VIEW_INACTIVE));
+same('con búsqueda y página', ['view' => 'inactive', 'q' => 'laura', 'page' => 3], list_state('laura', 3, VIEW_INACTIVE));
+same('list_url de la vista normal no cambia', 'index.php?q=laura&page=2', list_url('laura', 2));
+same('list_url de eliminados', 'index.php?view=inactive', list_url('', 1, [], VIEW_INACTIVE));
+same('list_url de eliminados con aviso, búsqueda y página', 'index.php?msg=restored&view=inactive&q=laura&page=2', list_url('laura', 2, ['msg' => 'restored'], VIEW_INACTIVE));
+
+section('Mejora 4: avisos de duplicado cuando el dueño está eliminado');
+same('correo, alta', 'Ya existe un usuario registrado con ese correo.', duplicate_message('email', false, false));
+same('documento, edición', 'Ya existe otro usuario registrado con ese documento.', duplicate_message('document', true, false));
+same('correo de un eliminado: manda a restaurar', 'Ese correo pertenece a un usuario eliminado. Restáuralo desde «Eliminados» o usa otro correo.', duplicate_message('email', false, true));
+same('documento de un eliminado', 'Ese documento pertenece a un usuario eliminado. Restáuralo desde «Eliminados» o usa otro documento.', duplicate_message('document', true, true));
+same('un campo desconocido no consulta nada (devuelve false sin tocar la BD)', false, (function (): bool {
+    $pdo = new class extends PDO { public function __construct() {} public function prepare(string $query, array $options = []): PDOStatement|false { throw new LogicException('no debe consultar'); } };
+
+    return conflicting_user_is_inactive($pdo, 'name; DROP TABLE users', 'x');
+})());
 
 finish();

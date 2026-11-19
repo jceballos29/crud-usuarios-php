@@ -3,7 +3,7 @@
 # Comprueba la migración 001 (Mejora 3) sin tocar la base de datos real: crea dos bases de prueba,
 #   migration_old  -> el esquema ANTERIOR a la mejora 3 con 3 usuarios, al que se aplica la migración
 #   migration_new  -> el esquema de instalación nueva (database/01-schema.sql)
-# y comprueba que (1) los usuarios antiguos conservan sus datos y reciben los valores por defecto,
+# (más las migraciones posteriores, para poder compararlo con 01-schema.sql) y comprueba que (1) los usuarios antiguos conservan sus datos y reciben los valores por defecto,
 # (2) las dos bases acaban con las MISMAS columnas e índices (así 01-schema.sql y la migración no se
 # desincronizan) y (3) aplicar la migración dos veces falla sin cambiar nada. Usa root (crea bases) y
 # borra las dos bases al terminar. Sale con 0 si todo pasa y con 1 si algo falla.
@@ -47,7 +47,10 @@ AFTER=$(printf 'SELECT id,name,last_name,email,IFNULL(phone,"NULL"),created_at F
 [ "$BEFORE" = "$AFTER" ]; ok "los 3 usuarios conservan sus datos (incluida la fecha de creación)" $?
 [ "$(printf 'SELECT COUNT(*) FROM users WHERE document IS NULL AND birth_date IS NULL AND role="user";\n' | root migration_old)" = 3 ]; ok "los 3 reciben documento NULL, fecha NULL y rol «user»" $?
 
-echo "== La BD migrada y la instalación nueva son idénticas"
+echo "== La BD migrada (con TODAS las migraciones) y la instalación nueva son idénticas"
+# 01-schema.sql describe el estado final, así que se compara tras aplicar también las migraciones posteriores
+# (la 002 se prueba por separado en tests/migration-002.sh).
+for later in database/migrations/00[2-9]-*.sql; do [ -e "$later" ] && root migration_old < "$later" >/dev/null; done
 STRUCT="SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, IFNULL(COLUMN_DEFAULT,'NULL'), COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='users' ORDER BY ORDINAL_POSITION;"
 IDX="SELECT INDEX_NAME, SEQ_IN_INDEX, COLUMN_NAME, NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='users' ORDER BY INDEX_NAME, SEQ_IN_INDEX;"
 A=$(printf "$STRUCT\n" migration_old | root); B=$(printf "$STRUCT\n" migration_new | root)

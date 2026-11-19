@@ -45,6 +45,9 @@ chk() {
 header_of() { grep -i "^$1:" "$TMP/head" | tr -d '\r' | head -1; }
 id_of() { sql "SELECT id FROM users WHERE email='$1';"; }
 exists() { [ "$(sql "SELECT COUNT(*) FROM users WHERE id=$1;")" = 1 ]; }
+# Con borrado lógico (M4) "eliminado" ya no es "la fila no existe": es la fila con active = 0.
+soft_deleted() { [ "$(sql "SELECT COUNT(*) FROM users WHERE id=$1 AND active=0;")" = 1 ]; }
+is_active() { [ "$(sql "SELECT COUNT(*) FROM users WHERE id=$1 AND active=1;")" = 1 ]; }
 create() { curl -s -o /dev/null -H "Origin: $ORIGIN" --data-urlencode "name=$1" --data-urlencode "last_name=$2" -d "role=user&email=$3" "$BASE/create.php"; }
 wait_db() {
     local i
@@ -385,12 +388,98 @@ exists "$U1"; ok "tras los 403, el usuario sigue existiendo" $?
 for bad in "" "id=abc" "id=0" "id=%2B$U1" "id%5B%5D=1"; do chk "POST con origen correcto y '$bad'" 400 -H "Origin: $ORIGIN" -d "$bad" "$BASE/delete.php"; done
 chk "POST con solo Referer correcto (con ruta y query)" 302 -H "Referer: $ORIGIN/index.php?msg=created" -d "id=$U1" "$BASE/delete.php"
 header_of location | grep -q 'msg=deleted'; ok "redirige a msg=deleted" $?
-! exists "$U1"; ok "el usuario desapareció" $?
-chk "repetir el borrado (ya no existe)" 302 -H "Origin: $ORIGIN" -d "id=$U1" "$BASE/delete.php"
+soft_deleted "$U1"; ok "el usuario NO se borró: la fila sigue con active = 0" $?
+chk "repetir el borrado (ya estaba eliminado)" 302 -H "Origin: $ORIGIN" -d "id=$U1" "$BASE/delete.php"
 header_of location | grep -q 'msg=missing'; ok "redirige a msg=missing (no es un error)" $?
 chk "POST con un id válido que nunca existió" 302 -H "Origin: $ORIGIN" -d "id=4294967295" "$BASE/delete.php"
 chk "borrar al usuario con apóstrofe, con Origin en mayúsculas" 302 -H "Origin: $(printf '%s' "$ORIGIN" | tr '[:lower:]' '[:upper:]')" -d "id=$UO" "$BASE/delete.php"
-! exists "$UO"; ok "el usuario O'Brien desapareció" $?
+soft_deleted "$UO"; ok "el usuario O'Brien quedó con active = 0 (la fila sigue)" $?
+
+section "Borrado lógico (M4): la fila se conserva y deja de verse"
+chk "alta de un usuario para eliminar" 302 -H "Origin: $ORIGIN" -d "name=Papelera&last_name=Prueba&email=smoke-m4-a@example.com&document=PA-123456&role=editor" "$BASE/create.php"
+M4=$(id_of smoke-m4-a@example.com)
+chk "otro usuario que se queda" 302 -H "Origin: $ORIGIN" -d "name=Papelera&last_name=Quedo&email=smoke-m4-b@example.com&role=user" "$BASE/create.php"
+M4B=$(id_of smoke-m4-b@example.com)
+chk "buscar antes de eliminar" 200 --get --data-urlencode "q=smoke-m4" "$BASE/"
+[ "$(grep -c 'edit.php?id=' "$TMP/body")" = 2 ]; ok "se ven los 2 usuarios" $?
+chk "eliminar a uno" 302 -H "Origin: $ORIGIN" -d "id=$M4" "$BASE/delete.php"
+[ "$(header_of location)" = "Location: index.php?msg=deleted" ]; ok "redirige a msg=deleted" $?
+[ "$(sql "SELECT CONCAT(email,'|',document,'|',role,'|',active) FROM users WHERE id=$M4;")" = "smoke-m4-a@example.com|PA-123456|editor|0" ]; ok "la fila conserva TODOS sus datos y solo cambia active a 0" $?
+chk "listado tras eliminar" 200 --get --data-urlencode "q=smoke-m4" "$BASE/"
+[ "$(grep -c 'edit.php?id=' "$TMP/body")" = 1 ] && ! grep -q "id=$M4" "$TMP/body"; ok "el eliminado ya no sale en el listado (queda 1)" $?
+tr -d '\n' < "$TMP/body" | sed -E 's/\s+/ /g' | grep -qF "Lista de Usuarios"; ok "...que sigue siendo «Lista de Usuarios»" $?
+chk "buscar por su documento" 200 --get --data-urlencode "q=PA-123456" "$BASE/"
+! grep -q 'edit.php?id=' "$TMP/body" && grep -qF 'No se encontraron resultados' "$TMP/body"; ok "...tampoco se encuentra por documento" $?
+chk "el total del título (sin buscar) no cuenta al eliminado" 200 "$BASE/"
+TOTAL_ACTIVE=$(sql 'SELECT COUNT(*) FROM users WHERE active=1;')
+tr -d '\n' < "$TMP/body" | sed -E 's/\s+/ /g' | grep -qF "Lista de Usuarios ($TOTAL_ACTIVE)"; ok "el título cuenta $TOTAL_ACTIVE (solo los visibles)" $?
+chk "editar al eliminado" 404 "$BASE/edit.php?id=$M4"
+chk "guardar cambios del eliminado" 404 -H "Origin: $ORIGIN" -d "id=$M4&name=Hack&last_name=Hack&email=smoke-m4-a@example.com&role=admin" "$BASE/edit.php"
+[ "$(sql "SELECT name FROM users WHERE id=$M4;")" = Papelera ]; ok "...y no se modificó" $?
+chk "eliminar otra vez al eliminado" 302 -H "Origin: $ORIGIN" -d "id=$M4" "$BASE/delete.php"
+header_of location | grep -q 'msg=missing'; ok "...avisa que no había nada que eliminar (missing)" $?
+
+section "Vista de eliminados (M4): ?view=inactive"
+chk "vista de eliminados" 200 --get --data-urlencode "view=inactive" --data-urlencode "q=smoke-m4" "$BASE/"
+[ "$(grep -c 'action="restore.php"' "$TMP/body")" = 1 ] && grep -q "name=\"id\" value=\"$M4\"" "$TMP/body"; ok "lista solo al eliminado, con su botón Restaurar" $?
+! grep -q 'edit.php?id=' "$TMP/body" && ! grep -q 'action="delete.php"' "$TMP/body"; ok "...sin Editar ni Eliminar (un eliminado se restaura, no se edita)" $?
+tr -d '\n' < "$TMP/body" | sed -E 's/\s+/ /g' | grep -qF "Usuarios eliminados"; ok "...con su título" $?
+tr -d '\n' < "$TMP/body" | grep -qE 'type="hidden" name="view" value="inactive"'; ok "...y el buscador se queda en esta vista (campo oculto view)" $?
+grep -qF 'Ver usuarios' "$TMP/body"; ok "...con enlace de vuelta a los usuarios" $?
+chk "view=INACTIVE (mayúsculas) es la vista normal" 200 --get --data-urlencode "view=INACTIVE" --data-urlencode "q=smoke-m4" "$BASE/"
+grep -q "id=$M4B" "$TMP/body" && ! grep -q 'action="restore.php"' "$TMP/body"; ok "...(muestra al visible, no al eliminado)" $?
+chk "view como arreglo es la vista normal" 200 "$BASE/?view%5B%5D=inactive&q=smoke-m4"
+! grep -q 'action="restore.php"' "$TMP/body"; ok "...igual" $?
+chk "el enlace «Eliminados» desde la vista normal" 200 --get --data-urlencode "q=smoke-m4" "$BASE/"
+grep -qF 'href="index.php?view=inactive&amp;q=smoke-m4"' "$TMP/body"; ok "conserva la búsqueda al cambiar de vista" $?
+
+section "Restaurar (restore.php)"
+chk "GET restore.php" 405 "$BASE/restore.php?id=$M4"
+[ "$(header_of allow)" = "Allow: POST" ]; ok "405 con Allow: POST" $?
+chk "restaurar sin origen" 403 -d "id=$M4" "$BASE/restore.php"
+chk "restaurar con Origin ajeno" 403 -H "Origin: http://evil.example" -d "id=$M4" "$BASE/restore.php"
+chk "restaurar sin origen y con id=abc (403 antes que 400)" 403 -d "id=abc" "$BASE/restore.php"
+soft_deleted "$M4"; ok "tras los 405 y 403 sigue eliminado" $?
+for bad in "" "id=abc" "id=0" "id%5B%5D=1"; do chk "restaurar con origen correcto y '$bad'" 400 -H "Origin: $ORIGIN" -d "$bad" "$BASE/restore.php"; done
+chk "restaurar a un id que no existe" 302 -H "Origin: $ORIGIN" -d "id=4294967295" "$BASE/restore.php"
+header_of location | grep -q 'msg=not_restored'; ok "...avisa que no había nada que restaurar" $?
+chk "restaurar a un usuario que está ACTIVO" 302 -H "Origin: $ORIGIN" -d "id=$M4B" "$BASE/restore.php"
+header_of location | grep -q 'msg=not_restored'; ok "...tampoco restaura nada" $?
+chk "restaurar al eliminado" 302 -H "Origin: $ORIGIN" -d "id=$M4&view=inactive&q=smoke-m4" "$BASE/restore.php"
+[ "$(header_of location)" = "Location: index.php?msg=restored&view=inactive&q=smoke-m4" ]; ok "vuelve a la lista de eliminados, con su búsqueda y el aviso" $?
+is_active "$M4"; ok "active vuelve a 1" $?
+[ "$(sql "SELECT CONCAT(name,'|',document,'|',role) FROM users WHERE id=$M4;")" = "Papelera|PA-123456|editor" ]; ok "...con todos sus datos intactos" $?
+chk "aviso de restaurado" 200 "$BASE/index.php?msg=restored&view=inactive"
+grep -qF 'El usuario ha sido restaurado exitosamente.' "$TMP/body"; ok "se muestra el aviso" $?
+chk "el restaurado vuelve al listado" 200 --get --data-urlencode "q=PA-123456" "$BASE/"
+grep -q "id=$M4" "$TMP/body"; ok "y se encuentra por su documento" $?
+chk "restaurar otra vez" 302 -H "Origin: $ORIGIN" -d "id=$M4" "$BASE/restore.php"
+header_of location | grep -q 'msg=not_restored'; ok "...no restaura nada (not_restored)" $?
+
+section "El correo y el documento de un eliminado siguen ocupados (decisión de M4)"
+chk "eliminar de nuevo" 302 -H "Origin: $ORIGIN" -d "id=$M4" "$BASE/delete.php"
+chk "crear con el correo de un eliminado" 409 -H "Origin: $ORIGIN" -d "name=Otro&last_name=Nuevo&email=smoke-m4-a@example.com&role=user" "$BASE/create.php"
+grep -qF 'Ese correo pertenece a un usuario eliminado. Restáuralo desde «Eliminados»' "$TMP/body"; ok "el aviso explica que está eliminado y cómo recuperarlo" $?
+chk "crear con el documento de un eliminado (otra capitalización)" 409 -H "Origin: $ORIGIN" -d "name=Otro&last_name=Nuevo&email=smoke-m4-n@example.com&document=pa-123456&role=user" "$BASE/create.php"
+grep -qF 'Ese documento pertenece a un usuario eliminado' "$TMP/body"; ok "...también por documento" $?
+chk "crear con el correo de un usuario ACTIVO: aviso normal" 409 -H "Origin: $ORIGIN" -d "name=Otro&last_name=Nuevo&email=smoke-m4-b@example.com&role=user" "$BASE/create.php"
+grep -qF 'Ya existe un usuario registrado con ese correo.' "$TMP/body" && ! grep -qF 'eliminado' "$TMP/body"; ok "...sin hablar de eliminados" $?
+chk "editar a uno para ponerle el correo de un eliminado" 409 -H "Origin: $ORIGIN" -d "id=$M4B&name=Papelera&last_name=Quedo&email=smoke-m4-a@example.com&role=user" "$BASE/edit.php"
+grep -qF 'Ese correo pertenece a un usuario eliminado' "$TMP/body"; ok "...el aviso de edición también lo dice" $?
+[ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-m4-n@example.com';")" = 0 ]; ok "no se creó ningún usuario con esos datos" $?
+
+section "El estado se conserva en la vista de eliminados"
+sql "SET SESSION cte_max_recursion_depth = 100; INSERT INTO users (name, last_name, email, active) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 12) SELECT 'Elim', 'Pagina', CONCAT('smoke-m4-e', LPAD(i, 2, '0'), '@example.com'), 0 FROM n;" >/dev/null
+chk "eliminados, página 2" 200 --get --data-urlencode "view=inactive" --data-urlencode "q=smoke-m4-e" --data-urlencode "page=2" "$BASE/"
+[ "$(grep -c 'action="restore.php"' "$TMP/body")" = 2 ]; ok "12 eliminados: la página 2 tiene 2 filas" $?
+LINKS=$(tr -d '\n' < "$TMP/body" | grep -oE '<nav aria-label="Paginación.*</nav>' | grep -oE 'href="[^"]*"')
+[ -n "$LINKS" ] && ! printf '%s\n' "$LINKS" | grep -qv 'view=inactive'; ok "los enlaces de página se quedan en la vista de eliminados" $?
+tr -d '\n' < "$TMP/body" | grep -qE 'name="view" value="inactive">\s*<input type="hidden" name="q" value="smoke-m4-e">\s*<input type="hidden" name="page" value="2">'; ok "el botón Restaurar lleva view, q y page" $?
+LAST2=$(grep -oE 'name="id" value="[0-9]+"' "$TMP/body" | grep -oE '[0-9]+')
+for id in $LAST2; do chk "restaurar al $id desde la página 2" 302 -H "Origin: $ORIGIN" -d "id=$id&view=inactive&q=smoke-m4-e&page=2" "$BASE/restore.php"; done
+chk "al restaurar a los de la última página, la página 2 ya no existe: se muestra la nueva última" 200 "$BASE/index.php?msg=restored&view=inactive&q=smoke-m4-e&page=2"
+tr -d '\n' < "$TMP/body" | sed -E 's/\s+/ /g' | grep -qF "10 resultados para «smoke-m4-e»."; ok "(quedan 10: una sola página, sin «Mostrando»)" $?
+[ "$(grep -c 'action="restore.php"' "$TMP/body")" = 10 ]; ok "...con 10 filas" $?
 
 if [ "$WITH_DB_STOP" = 1 ]; then
     section "Base de datos detenida (503)"
@@ -407,6 +496,8 @@ if [ "$WITH_DB_STOP" = 1 ]; then
     chk "POST edit.php" 503 -H "Origin: $ORIGIN" -d "role=user&id=$U2&name=Ana&last_name=Ruiz&email=smoke-y@example.com" "$BASE/edit.php"
     grep -q 'value="Ana"' "$TMP/body"; ok "edit.php conserva lo que escribió el usuario" $?
     chk "POST delete.php con origen correcto" 503 -H "Origin: $ORIGIN" -d "id=$U2" "$BASE/delete.php"
+    chk "POST restore.php con origen correcto" 503 -H "Origin: $ORIGIN" -d "id=$U2" "$BASE/restore.php"
+    chk "GET /?view=inactive" 503 "$BASE/?view=inactive"
     chk "POST delete.php con origen ajeno (se comprueba antes que la BD)" 403 -H "Origin: http://evil.example" -d "id=$U2" "$BASE/delete.php"
     chk "POST delete.php con id inválido (se comprueba antes que la BD)" 400 -H "Origin: $ORIGIN" -d "id=abc" "$BASE/delete.php"
     chk "GET status.php" 503 "$BASE/status.php"

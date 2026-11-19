@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/request-guard.php';
+require_once __DIR__ . '/../includes/user-conflict.php';
 
 $pageTitle = "Registrar";
 
@@ -36,9 +37,8 @@ if ($submitted) {
 
             if ($duplicate !== null) {
                 http_response_code(409);
-                $errors[$duplicate] = $duplicate === 'email'
-                    ? 'Ya existe un usuario registrado con ese correo.'
-                    : 'Ya existe un usuario registrado con ese documento.';
+                // ¿El dueño está en la papelera? Entonces el aviso lo dice (el listado no lo enseña).
+                $errors[$duplicate] = duplicate_message($duplicate, false, conflicting_user_is_inactive($pdo, $duplicate, $data[$duplicate]));
             } else {
                 [$status, $errorMessage] = describe_failure($error, 'No se pudo guardar el usuario. Inténtalo más tarde.');
                 http_response_code($status);

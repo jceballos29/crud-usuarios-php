@@ -14,6 +14,22 @@ declare(strict_types=1);
 /** Usuarios por página. */
 const USERS_PER_PAGE = 10;
 
+/** Vistas del listado (M4): los usuarios visibles y los eliminados (borrado lógico). */
+const VIEW_ACTIVE = 'active';
+const VIEW_INACTIVE = 'inactive';
+
+/**
+ * Convierte el parámetro ?view= en una vista. Solo "inactive" (exacto) pide los eliminados; cualquier
+ * otra cosa (vacío, otro texto, mayúsculas, un arreglo) es la vista normal. Es una lista blanca de dos.
+ *
+ * @param mixed $raw Valor crudo de $_GET['view'] (o null si no llegó).
+ * @return string VIEW_ACTIVE o VIEW_INACTIVE.
+ */
+function parse_view(mixed $raw): string
+{
+    return $raw === VIEW_INACTIVE ? VIEW_INACTIVE : VIEW_ACTIVE;
+}
+
 /**
  * Convierte el parámetro ?page= en un número de página.
  *
@@ -113,11 +129,16 @@ function page_links(int $page, int $pages, int $radius = 2): array
  *
  * @param string $search Término ya limpio con parse_search_term().
  * @param int $page Página (>= 1).
- * @return array<string, string|int> Vacío si es la página 1 sin búsqueda.
+ * @param string $view VIEW_ACTIVE (se omite) o VIEW_INACTIVE.
+ * @return array<string, string|int> Vacío si es la vista normal, página 1 y sin búsqueda.
  */
-function list_state(string $search, int $page): array
+function list_state(string $search, int $page, string $view = VIEW_ACTIVE): array
 {
     $state = [];
+
+    if ($view === VIEW_INACTIVE) {
+        $state['view'] = VIEW_INACTIVE;
+    }
 
     if ($search !== '') {
         $state['q'] = $search;
@@ -139,11 +160,12 @@ function list_state(string $search, int $page): array
  * @param string $search Término ya limpio con parse_search_term().
  * @param int $page Página (>= 1).
  * @param array<string, string|int> $extra Parámetros extra que van antes del estado.
+ * @param string $view VIEW_ACTIVE o VIEW_INACTIVE.
  * @return string Ruta relativa: "index.php" o "index.php?msg=deleted&q=laura&page=2".
  */
-function list_url(string $search, int $page = 1, array $extra = []): string
+function list_url(string $search, int $page = 1, array $extra = [], string $view = VIEW_ACTIVE): string
 {
-    $params = $extra + list_state($search, $page);
+    $params = $extra + list_state($search, $page, $view);
 
     return 'index.php' . ($params === [] ? '' : '?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986));
 }

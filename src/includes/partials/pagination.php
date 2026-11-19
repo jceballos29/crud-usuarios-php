@@ -10,6 +10,7 @@ declare(strict_types=1);
  * <span>, que no recibe el foco ni se puede pulsar, en vez de un enlace que no lleva a ninguna parte.
  *
  * @var string $search Término buscado ya limpio ('' si no hay búsqueda).
+ * @var string $view VIEW_ACTIVE o VIEW_INACTIVE: los enlaces de página se quedan en la misma vista.
  * @var array{page: int, pages: int, perPage: int, offset: int, total: int, from: int, to: int} $pagination Resultado de paginate().
  */
 
@@ -23,7 +24,7 @@ $last = $pagination['pages'];
 <nav aria-label="Paginación del listado de usuarios">
     <ul class="pagination">
         <?php if ($current > 1): ?>
-            <li class="page-item"><a class="page-link" href="<?= escape(list_url($search, $current - 1)) ?>" rel="prev">Anterior</a></li>
+            <li class="page-item"><a class="page-link" href="<?= escape(list_url($search, $current - 1, [], $view)) ?>" rel="prev">Anterior</a></li>
         <?php else: ?>
             <li class="page-item disabled"><span class="page-link">Anterior</span></li>
         <?php endif; ?>
@@ -34,12 +35,12 @@ $last = $pagination['pages'];
             <?php elseif ($number === $current): ?>
                 <li class="page-item active"><span class="page-link" aria-current="page"><?= $number ?></span></li>
             <?php else: ?>
-                <li class="page-item"><a class="page-link" href="<?= escape(list_url($search, $number)) ?>" aria-label="Página <?= $number ?>"><?= $number ?></a></li>
+                <li class="page-item"><a class="page-link" href="<?= escape(list_url($search, $number, [], $view)) ?>" aria-label="Página <?= $number ?>"><?= $number ?></a></li>
             <?php endif; ?>
         <?php endforeach; ?>
 
         <?php if ($current < $last): ?>
-            <li class="page-item"><a class="page-link" href="<?= escape(list_url($search, $current + 1)) ?>" rel="next">Siguiente</a></li>
+            <li class="page-item"><a class="page-link" href="<?= escape(list_url($search, $current + 1, [], $view)) ?>" rel="next">Siguiente</a></li>
         <?php else: ?>
             <li class="page-item disabled"><span class="page-link">Siguiente</span></li>
         <?php endif; ?>

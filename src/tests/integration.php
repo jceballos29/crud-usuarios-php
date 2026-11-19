@@ -16,6 +16,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/connection.php';
 require_once __DIR__ . '/../includes/user-validation.php';
+require_once __DIR__ . '/../includes/user-conflict.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
 require_once __DIR__ . '/harness.php';
@@ -50,16 +51,16 @@ $total = count($rows); // 31
  *
  * @return array{ids: list<int>, total: int, pagination: array<string, int>}
  */
-function fetchPage(PDO $pdo, string $term, int $requestedPage): array
+function fetchPage(PDO $pdo, string $term, int $requestedPage, bool $active = true): array
 {
-    [$countSql, $countParams] = user_count_query($term);
+    [$countSql, $countParams] = user_count_query($term, $active);
     $stmt = $pdo->prepare($countSql);
     bind_all($stmt, $countParams);
     $stmt->execute();
     $count = (int) $stmt->fetchColumn();
 
     $pagination = paginate($count, $requestedPage);
-    [$sql, $params] = user_list_query($term, $pagination['perPage'], $pagination['offset']);
+    [$sql, $params] = user_list_query($term, $pagination['perPage'], $pagination['offset'], $active);
     $stmt = $pdo->prepare($sql);
     bind_all($stmt, $params);
     $stmt->execute();
@@ -168,6 +169,54 @@ same('los máximos de user_fields() coinciden con las columnas (document, phone)
 section('Mejora 3: la búsqueda también encuentra por documento');
 same('«zx-9988» (minúsculas, a medias) encuentra a Zoé', ['Zoé'], $literal('zx-9988'));
 same('un documento que no existe no encuentra a nadie', [], $literal('QQ-000000'));
+
+section('Mejora 4: el borrado lógico oculta de verdad (listado, recuento, búsqueda y páginas)');
+$idOf = static fn(string $email): int => (int) $pdo->query("SELECT id FROM users WHERE email = '$email'")->fetchColumn();
+$gone = [$idOf('itest-01@example.com'), $idOf('itest-02@example.com'), $idOf('itest-zoe@example.com'), $idOf('itest-pct@example.com')];
+$pdo->exec('UPDATE users SET active = 0 WHERE id IN (' . implode(',', $gone) . ')');
+$visible = fetchPage($pdo, '', 1);
+same('el recuento de visibles baja en 4', $total - 4, $visible['total']);
+same('ningún eliminado aparece en las páginas de visibles', [], (function () use ($pdo, $gone): array {
+    $seen = [];
+    for ($p = 1; $p <= 4; $p++) {
+        $seen = array_merge($seen, fetchPage($pdo, '', $p)['ids']);
+    }
+
+    return array_values(array_intersect($seen, $gone));
+})());
+same('la búsqueda tampoco encuentra a un eliminado («zx-9988» era el documento de Zoé)', [], $literal('zx-9988'));
+same('...ni por nombre', [], $literal('ZOE nunez'));
+same('«%» deja de encontrar a Pct%Real eliminado', [], $literal('%'));
+$hidden = fetchPage($pdo, '', 1, false);
+same('la vista de eliminados cuenta exactamente los 4', 4, $hidden['total']);
+same('...y trae exactamente esos ids (de mayor a menor)', [...(function () use ($gone): array { rsort($gone); return $gone; })()], $hidden['ids']);
+same('buscar dentro de los eliminados: «itest-0» encuentra solo itest-01 e itest-02', 2, fetchPage($pdo, 'itest-0', 1, false)['total']);
+same('una búsqueda que solo casa con visibles no encuentra nada en eliminados', 0, fetchPage($pdo, 'itest-03', 1, false)['total']);
+same('visibles + eliminados = todos', $total, fetchPage($pdo, '', 1)['total'] + fetchPage($pdo, '', 1, false)['total']);
+
+section('Mejora 4: restaurar y los UNIQUE (cubren también a los eliminados)');
+$gonePerson = $pdo->query("SELECT email, document FROM users WHERE email = 'itest-zoe@example.com'")->fetch();
+same('el dueño eliminado de un correo se detecta como eliminado', true, conflicting_user_is_inactive($pdo, 'email', 'itest-zoe@example.com'));
+same('...también con otra capitalización (collation)', true, conflicting_user_is_inactive($pdo, 'email', 'ITEST-ZOE@example.com'));
+same('...y por documento', true, conflicting_user_is_inactive($pdo, 'document', 'ZX-998877'));
+same('el dueño de un correo ACTIVO no se marca como eliminado', false, conflicting_user_is_inactive($pdo, 'email', 'itest-03@example.com'));
+same('un correo que no existe no es de un eliminado', false, conflicting_user_is_inactive($pdo, 'email', 'nadie@example.com'));
+$duplicate = null;
+try {
+    $insert->execute([':n' => 'Otro', ':l' => 'Zoe', ':e' => 'itest-zoe@example.com', ':p' => null]);
+} catch (PDOException $error) {
+    $duplicate = duplicate_user_field((string) ($error->errorInfo[2] ?? ''));
+}
+same('crear otro usuario con el correo de un eliminado SIGUE chocando con el UNIQUE (decisión de M4)', 'email', $duplicate);
+$pdo->exec('UPDATE users SET active = 1 WHERE id IN (' . implode(',', $gone) . ')');
+same('restaurar (active = 1) no choca con ningún UNIQUE', $total, fetchPage($pdo, '', 1)['total']);
+same('...y la vista de eliminados queda vacía', 0, fetchPage($pdo, '', 1, false)['total']);
+same('...y Zoé vuelve a encontrarse', ['Zoé'], $literal('zx-9988'));
+
+section('Mejora 4: el índice (active, id) existe');
+// Con 31 filas el optimizador prefiere recorrer la clave primaria, así que EXPLAIN no demuestra nada aquí:
+// que el índice se USA con muchas filas se midió aparte con 200.000 (ver plan.md, M4). Esto solo vigila que exista.
+same('idx_active_id es un índice de (active, id)', ['active', 'id'], $pdo->query("SELECT COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_active_id' ORDER BY SEQ_IN_INDEX")->fetchAll(PDO::FETCH_COLUMN));
 
 section('Un texto hostil se trata como texto');
 foreach (["' OR '1'='1", "'; DROP TABLE users; --", '" OR 1=1 --', '%\' OR \'x\' LIKE \'%'] as $hostile) {
