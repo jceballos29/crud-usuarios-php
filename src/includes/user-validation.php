@@ -58,6 +58,29 @@ function parse_user_id(mixed $raw): ?int
 }
 
 /**
+ * Huella del contenido de una fila de usuario, para detectar ediciones simultáneas (bloqueo
+ * optimista). El formulario de edición la lleva en un campo oculto (row_token); al enviarlo se compara
+ * con la huella de la fila tal como está AHORA en la BD: si no coincide, otra persona la modificó
+ * mientras se editaba y no se guarda nada. Si dos personas guardan los mismos valores la huella no
+ * cambia y no hay conflicto. No es un secreto ni una medida de seguridad: es el "control de versiones"
+ * de la fila, sin añadir ninguna columna al esquema.
+ *
+ * @param array{name: mixed, last_name: mixed, email: mixed, phone: mixed} $row Fila de la tabla users.
+ * @return string sha256 en hexadecimal (64 caracteres).
+ */
+function user_row_token(array $row): string
+{
+    $content = json_encode([
+        (string) $row['name'],
+        (string) $row['last_name'],
+        (string) $row['email'],
+        $row['phone'] === null ? null : (string) $row['phone'],
+    ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+
+    return hash('sha256', $content === false ? '' : $content);
+}
+
+/**
  * Definición de los campos del formulario de usuario.
  * Los máximos coinciden con las columnas de database/01-schema.sql.
  *
@@ -69,7 +92,7 @@ function user_fields(): array
         'name'      => ['label' => 'Nombre',   'type' => 'text',  'required' => true,  'max' => 100],
         'last_name' => ['label' => 'Apellido', 'type' => 'text',  'required' => true,  'max' => 100],
         'email'     => ['label' => 'Email',    'type' => 'email', 'required' => true,  'max' => 254],
-        'phone'     => ['label' => 'Teléfono', 'type' => 'text',  'required' => false, 'max' => 20, 'min_digits' => 7, 'max_digits' => 15],
+        'phone'     => ['label' => 'Teléfono', 'type' => 'tel',   'required' => false, 'max' => 20, 'min_digits' => 7, 'max_digits' => 15],
     ];
 }
 
@@ -119,8 +142,13 @@ function validate_user(array $data, array $fields): array
     $errors = [];
     $length = static fn(string $value): int => mb_strlen($value, 'UTF-8');
 
-    // Letras (con tildes), espacio literal, apóstrofe, punto y guion: O'Brien, María-José.
-    $personName = '/^\p{L}[\p{L}\p{M} \'’.-]*$/u';
+    // Nombre y apellido: permisivo a propósito. Una validación que rechaza datos legítimos es un
+    // fallo, y la BD solo exige NOT NULL. Basta con (1) al menos una letra de cualquier alfabeto y
+    // (2) ningún carácter de control (saltos de línea, tabuladores, NUL). Así valen Pere Cal·lís,
+    // Smith, Jr., O'Brien o 李雷, y también los nombres con ZWNJ (persa, por ejemplo), que una lista
+    // de caracteres permitidos o \p{C} rechazarían. El escape al mostrar (escape()) es lo que
+    // protege del XSS, no esta regla. Un UTF-8 inválido hace fallar preg_match y también se rechaza.
+    $personName = '/^(?=.*\p{L})[^\p{Cc}]+$/u';
 
     // Nombre y apellido: sin mínimo de longitud (la BD solo exige NOT NULL).
     $personFields = ['name' => 'nombre', 'last_name' => 'apellido'];
@@ -132,7 +160,7 @@ function validate_user(array $data, array $fields): array
         } elseif ($length($data[$fieldName]) > $max) {
             $errors[$fieldName] = sprintf('El %s no debe superar los %d caracteres.', $noun, $max);
         } elseif (!preg_match($personName, $data[$fieldName])) {
-            $errors[$fieldName] = sprintf('El %s solo puede contener letras, espacios, apóstrofes, puntos y guiones.', $noun);
+            $errors[$fieldName] = sprintf('El %s debe incluir al menos una letra y no puede contener saltos de línea ni caracteres de control.', $noun);
         }
     }
 
@@ -141,7 +169,7 @@ function validate_user(array $data, array $fields): array
         $errors['email'] = 'El email es obligatorio.';
     } elseif ($length($data['email']) > $fields['email']['max']) {
         $errors['email'] = sprintf('El email no debe superar los %d caracteres.', $fields['email']['max']);
-    } elseif (filter_var($data['email'], FILTER_VALIDATE_EMAIL) === false) {
+    } elseif (filter_var($data['email'], FILTER_VALIDATE_EMAIL, FILTER_FLAG_EMAIL_UNICODE) === false) {
         $errors['email'] = 'Ingresa un email válido.';
     }
 

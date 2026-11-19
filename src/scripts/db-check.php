@@ -14,11 +14,11 @@ function environment(string $name): string
     return $value;
 }
 
+// Sin dbname a propósito: el script lista las bases que el usuario puede ver, no entra en ninguna.
 $dsn = sprintf(
     'mysql:host=%s;port=%s;charset=utf8mb4',
     environment('DB_HOST'),
-    environment('DB_PORT'),
-    environment('DB_DATABASE')
+    environment('DB_PORT')
 );
 
 try {

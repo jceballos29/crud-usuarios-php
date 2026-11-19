@@ -31,6 +31,30 @@ function escape(mixed $value): string
 }
 
 /**
+ * Convierte una fecha guardada en UTC (así la guarda la BD) a la zona horaria de la aplicación.
+ *
+ * Ejemplo (con date.timezone = America/Bogota):
+ *     format_utc_datetime('2026-11-19 14:08:36');                     // '2026-11-19 09:08:36'
+ *     format_utc_datetime('2026-11-19 14:08:36', 'Europe/Madrid');    // '2026-11-19 15:08:36'
+ *
+ * @param string $utc Fecha 'Y-m-d H:i:s' en UTC, tal como sale de la BD.
+ * @param string|null $timezone Zona de destino; por defecto la de PHP (date.timezone).
+ * @return string La fecha en la zona de destino, con el mismo formato. Si la fecha o la zona no
+ *                son válidas devuelve el texto original en vez de romper la página.
+ */
+function format_utc_datetime(string $utc, ?string $timezone = null): string
+{
+    try {
+        $date = new DateTimeImmutable($utc, new DateTimeZone('UTC'));
+        $zone = new DateTimeZone($timezone ?? date_default_timezone_get());
+    } catch (Exception) {
+        return $utc;
+    }
+
+    return $date->setTimezone($zone)->format('Y-m-d H:i:s');
+}
+
+/**
  * Registra las excepciones en el log.
  *
  * @param string $step El paso en el que ocurrió la excepción.
@@ -51,3 +75,37 @@ function log_exception(string $step, Throwable $error): void
     error_log($formattedLog);
 }
 
+/**
+ * Traduce un fallo de la capa de datos o de la configuración en un código HTTP y un aviso para el
+ * visitante, y lo registra en el log. Sustituye al bloque `try/catch` de tres ramas que se repetía
+ * en cada página: como DatabaseConnectionException y PDOException extienden RuntimeException, a cada
+ * página le basta un solo `catch (RuntimeException)`.
+ *
+ *  - DatabaseConnectionException (sin conexión)       -> 503, etiqueta [connection]
+ *  - PDOException (la consulta falló)                 -> 500, etiqueta [query], con $queryMessage
+ *  - cualquier otra RuntimeException (configuración)  -> 500, etiqueta [config]
+ *
+ * El aviso nunca lleva detalles técnicos: el detalle va solo al log.
+ *
+ * @param Throwable $error El fallo capturado.
+ * @param string $queryMessage Aviso para el caso de un error de consulta (cambia según la página).
+ * @return array{0: int, 1: string} [código HTTP, aviso para el visitante]
+ */
+function describe_failure(Throwable $error, string $queryMessage): array
+{
+    if ($error instanceof DatabaseConnectionException) {
+        log_exception('connection', $error);
+
+        return [503, 'No se pudo conectar a la base de datos. Inténtalo más tarde.'];
+    }
+
+    if ($error instanceof PDOException) {
+        log_exception('query', $error);
+
+        return [500, $queryMessage];
+    }
+
+    log_exception('config', $error);
+
+    return [500, 'Ocurrió un error inesperado. Inténtalo más tarde.'];
+}

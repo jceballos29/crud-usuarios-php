@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
+require_once __DIR__ . '/../includes/request-guard.php';
 
 $pageTitle = "Registrar";
 
@@ -14,6 +15,8 @@ $errorMessage = null; // error general (BD, configuración...)
 $submitted = $_SERVER['REQUEST_METHOD'] === 'POST';
 
 if ($submitted) {
+    reject_foreign_origin(); // 403 si el POST no viene del propio sitio, antes de mirar lo que envía
+
     $data = read_user_input($_POST, $fields);
     $errors = validate_user($data, $fields);
 
@@ -30,24 +33,15 @@ if ($submitted) {
             ]);
             header('Location: index.php?msg=created');
             exit;
-        } catch (DatabaseConnectionException $error) {
-            http_response_code(503);
-            $errorMessage = 'No se pudo conectar a la base de datos. Inténtalo más tarde.';
-            log_exception('connection', $error);
-        } catch (PDOException $error) {
+        } catch (RuntimeException $error) {
             // 1062 = entrada duplicada (columna email UNIQUE). 23000 es demasiado amplio.
-            if (($error->errorInfo[1] ?? null) === 1062) {
+            if ($error instanceof PDOException && ($error->errorInfo[1] ?? null) === 1062) {
                 http_response_code(409);
                 $errors['email'] = 'Ya existe un usuario registrado con ese correo.';
             } else {
-                http_response_code(500);
-                $errorMessage = 'No se pudo guardar el usuario. Inténtalo más tarde.';
-                log_exception('query', $error);
+                [$status, $errorMessage] = describe_failure($error, 'No se pudo guardar el usuario. Inténtalo más tarde.');
+                http_response_code($status);
             }
-        } catch (RuntimeException $error) {
-            http_response_code(500);
-            $errorMessage = 'Ocurrió un error inesperado. Inténtalo más tarde.';
-            log_exception('config', $error);
         }
     } else {
         // Regla de códigos: si el envío no se completó nunca es 200.
@@ -60,6 +54,7 @@ if ($submitted) {
 $action = 'create.php';
 $submitLabel = 'Registrar';
 $userId = null;
+$rowToken = null;
 
 require __DIR__ . '/../includes/layout/header.php';
 ?>

@@ -7,7 +7,6 @@ declare(strict_types=1);
  *
  * @var string|null $errorMessage
  * @var array<int, array{id: int|string, name: string, last_name: string, email: string, phone: ?string, created_at: string}> $users
- * @var array<int|string, string> $confirmTexts
  */
 ?>
 <?php if ($errorMessage !== null): ?>
@@ -47,14 +46,15 @@ declare(strict_types=1);
                 <td><?= escape($user['last_name']) ?></td>
                 <td><?= escape($user['email']) ?></td>
                 <td><?= escape($user['phone'] ?? "-") ?></td>
-                <td><?= escape($user['created_at']) ?></td>
+                <td><?= escape(format_utc_datetime((string) $user['created_at'])) ?></td>
                 <td>
+                    <?php $fullName = $user['name'] . ' ' . $user['last_name']; ?>
                     <div class="d-flex align-items-center">
-                        <a class="btn-subtle theme-warning btn-icon me-2" href="edit.php?id=<?= escape($user['id']) ?>" role="button" aria-label="Editar usuario"><i class="bi bi-pencil"></i></a>
-                        <form method="post" action="delete.php" class="d-inline"
-                            onsubmit="return confirm(<?= escape($confirmTexts[$user['id']]) ?>)">
+                        <a class="btn-subtle theme-warning btn-icon me-2" href="edit.php?id=<?= escape($user['id']) ?>" role="button" title="Editar" aria-label="Editar a <?= escape($fullName) ?>"><i class="bi bi-pencil" aria-hidden="true"></i></a>
+                        <?php /* data-confirm lo lee js/confirm-submit.js: sin onsubmit en línea (compatible con la CSP) y solo hace falta escapar para HTML. */ ?>
+                        <form method="post" action="delete.php" class="d-inline" data-confirm="<?= escape(sprintf('¿Eliminar a %s?', $fullName)) ?>">
                             <input type="hidden" name="id" value="<?= escape($user['id']) ?>">
-                            <button type="submit" class="btn-subtle theme-danger btn-icon" aria-label="Eliminar usuario"><i class="bi bi-trash-fill"></i></button>
+                            <button type="submit" class="btn-subtle theme-danger btn-icon" title="Eliminar" aria-label="Eliminar a <?= escape($fullName) ?>"><i class="bi bi-trash-fill" aria-hidden="true"></i></button>
                         </form>
                     </div>
                 </td>

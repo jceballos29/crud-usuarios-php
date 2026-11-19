@@ -13,6 +13,7 @@ declare(strict_types=1);
  * @var string $action URL de destino del formulario (create.php, edit.php).
  * @var string $submitLabel Texto del botón de envío (Registrar, Actualizar).
  * @var int|null $userId Id del usuario que se edita; null al crear (no se pinta el campo oculto).
+ * @var string|null $rowToken Huella de la fila con la que se abrió el formulario (user_row_token()); null al crear.
  */
 ?>
 <?php if ($errorMessage !== null): ?>
@@ -29,6 +30,9 @@ declare(strict_types=1);
     <?php if ($userId !== null): ?>
         <input type="hidden" name="id" value="<?= escape($userId) ?>">
     <?php endif; ?>
+    <?php if ($rowToken !== null): ?>
+        <input type="hidden" name="row_token" value="<?= escape($rowToken) ?>">
+    <?php endif; ?>
 
     <?php foreach ($fields as $fieldName => $definition): ?>
         <?php $hasError = isset($errors[$fieldName]); ?>
@@ -41,6 +45,8 @@ declare(strict_types=1);
                 name="<?= escape($fieldName) ?>"
                 value="<?= escape($data[$fieldName]) ?>"
                 maxlength="<?= escape($definition['max']) ?>"
+                <?php /* Son datos de OTRA persona: autocomplete="off" evita que el navegador rellene los del propio usuario. */ ?>
+                autocomplete="off"
                 <?= $definition['required'] ? 'required' : '' ?>
                 <?php if ($hasError): ?>aria-invalid="true" aria-describedby="<?= escape($fieldName) ?>-error" <?php endif; ?>>
             <?php if ($hasError): ?>

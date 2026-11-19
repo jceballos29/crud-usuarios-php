@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
-require_once __DIR__ . '/../includes/origin.php';
+require_once __DIR__ . '/../includes/request-guard.php';
 
 // delete.php solo atiende POST y casi nunca muestra pantalla: borra y redirige.
 // Cualquier otro método (GET al escribir la URL, PUT, DELETE...) recibe 405 y no se toca nada.
@@ -16,18 +16,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-try {
-    // Orden de las comprobaciones: método (405) -> origen (403) -> id (400) -> BD.
-    // Primero "¿quién pide?" y después "¿qué pide?": una petición de origen desconocido no recibe
-    // nada, ni siquiera la validación del id. APP_ORIGIN viene del entorno; si falta o no es un
-    // origen válido se lanza una RuntimeException y la página responde 500 (error de configuración).
-    if (!is_allowed_origin($_SERVER['HTTP_ORIGIN'] ?? null, $_SERVER['HTTP_REFERER'] ?? null, environment('APP_ORIGIN'))) {
-        http_response_code(403);
-        header('Content-Type: text/plain; charset=UTF-8');
-        echo "Origen no permitido.\n";
-        exit;
-    }
+// Orden de las comprobaciones: método (405) -> origen (403) -> id (400) -> BD.
+// Primero "¿quién pide?" y después "¿qué pide?" (ver includes/request-guard.php).
+reject_foreign_origin();
 
+try {
     // El id se valida ANTES de abrir la BD. Un id mal formado no identifica a ningún usuario:
     // es una petición incorrecta (400), no un usuario "ya borrado".
     $userId = parse_user_id($_POST['id'] ?? null);
@@ -51,18 +44,9 @@ try {
 
     header('Location: index.php?msg=' . $result);
     exit;
-} catch (DatabaseConnectionException $error) {
-    http_response_code(503);
-    $errorMessage = 'No se pudo conectar a la base de datos. Inténtalo más tarde.';
-    log_exception('connection', $error);
-} catch (PDOException $error) {
-    http_response_code(500);
-    $errorMessage = 'No se pudo eliminar el usuario. Inténtalo más tarde.';
-    log_exception('query', $error);
 } catch (RuntimeException $error) {
-    http_response_code(500);
-    $errorMessage = 'Ocurrió un error inesperado. Inténtalo más tarde.';
-    log_exception('config', $error);
+    [$status, $errorMessage] = describe_failure($error, 'No se pudo eliminar el usuario. Inténtalo más tarde.');
+    http_response_code($status);
 }
 
 // Si la BD falla no se redirige (sería un 302 y luego un 200): se responde con el código

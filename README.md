@@ -18,8 +18,8 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | MVP 3. Listar (Read) | Hecho |
 | MVP 4. Crear (Create) | Hecho |
 | MVP 5. Editar (Update) | Hecho |
-| MVP 6. Eliminar (Delete) | Hecho (pendiente commit) |
-| MVP 7. Revisión | Siguiente |
+| MVP 6. Eliminar (Delete) | Hecho |
+| MVP 7. Revisión | En curso |
 | Mejoras 1 a 8 | Pendientes |
 
 ## Qué se construye
@@ -64,7 +64,7 @@ Está en la carpeta superior (`../`), fuera de este proyecto a propósito:
 | Servicio | Imagen | Rol | Acceso |
 |----------|--------|-----|--------|
 | `nginx` | nginx 1.30 alpine | Recibe HTTP y sirve `src/public` | http://localhost:8080 |
-| `php` | php:8.4-fpm (Dockerfile propio) | Ejecuta PHP (FastCGI, puerto interno 9000) | solo desde nginx |
+| `php` | php:8.4.27-fpm, versión de parche fijada (Dockerfile propio) | Ejecuta PHP (FastCGI, puerto interno 9000) | solo desde nginx |
 | `db` | mysql:8.4 | Base de datos | solo red interna (host `db`, 3306) |
 | `adminer` | adminer 6.3 | Cliente web de BD (equivale a phpMyAdmin) | http://localhost:8081 |
 
@@ -87,12 +87,12 @@ Nginx y Adminer solo se publican en `127.0.0.1`: no son accesibles desde la red 
 Requisitos: Docker, Docker Compose y Git.
 
 ```bash
-cp .env.example .env     # y edita: DB_DATABASE=crud_usuarios, DB_USERNAME, claves
+cp .env.example .env     # y cambia al menos las claves (DB_PASSWORD y DB_ROOT_PASSWORD); el resto del ejemplo ya funciona
 docker compose up -d --build
 docker compose ps        # los 4 servicios en running; db en healthy
 ```
 
-- Diagnóstico del stack: http://localhost:8080/status.php
+- Diagnóstico del stack: http://localhost:8080/status.php (solo con `APP_ENV=local`; en cualquier otro entorno responde 404 para no revelar versiones)
 - Adminer: http://localhost:8081 (sistema MySQL, servidor `db`, credenciales de `.env`)
 
 > El script SQL de `database/` solo se ejecuta cuando el volumen de MySQL está vacío.
@@ -106,10 +106,21 @@ docker compose ps        # los 4 servicios en running; db en healthy
 | Ver logs (todos / PHP) | `docker compose logs -f` / `docker compose logs -f php` |
 | Shell en PHP | `docker compose exec php sh` |
 | Comprobar conexión a MySQL | `docker compose exec php php scripts/db-check.php` |
+| Pruebas unitarias (sin BD) | `docker compose exec php php tests/unit.php` |
+| Pruebas de punta a punta | `tests/smoke.sh` (añade `--with-db-stop` para parar y levantar la BD) |
 | Composer | `docker compose exec php composer <comando>` |
 | Ejecutar un `.sql` como root | `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < archivo.sql` |
 | Apagar (conserva datos) | `docker compose down` |
 | Apagar y borrar la BD | `docker compose down -v` |
+
+## Pruebas
+
+Hay dos niveles y no necesitan instalar nada más que lo que ya usa el proyecto:
+
+- **Unitarias** (`src/tests/unit.php`): las funciones puras (validación, id, origen, fechas, escape). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
+- **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, origen en los tres POST, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
+
+Ambos terminan con código 0 si todo pasa y con 1 si algo falla, así que sirven también para automatizarlos. Si cambias el puerto o el origen, usa `BASE_URL` y `ORIGIN`.
 
 ## Estructura
 
@@ -119,7 +130,9 @@ crud-usuarios-docker/
 ├── README.md
 ├── docker-compose.yml       # Servicios: php, nginx, db, adminer
 ├── .env / .env.example      # Variables (.env no se sube a git)
-├── docker/                  # Dockerfile de PHP, php.ini, xdebug.ini, nginx
+├── docker/                  # Dockerfile de PHP, php.ini (seguro), php.local.ini (solo desarrollo), xdebug.ini, nginx (cabeceras y CSP)
+├── tests/
+│   └── smoke.sh             # Pruebas de punta a punta con curl
 ├── database/
 │   ├── 01-schema.sql        # Tabla users
 │   └── 02-seed.sql          # SET NAMES utf8mb4 + 3 usuarios de prueba
@@ -129,15 +142,18 @@ crud-usuarios-docker/
     │   ├── create.php       # Alta de usuarios (MVP 4)
     │   ├── edit.php         # Edición de usuarios (MVP 5)
     │   ├── delete.php       # Borrado, solo POST y solo desde el propio sitio (MVP 6)
-    │   └── status.php       # Diagnóstico del stack (solo desarrollo)
+    │   ├── status.php       # Diagnóstico del stack (solo APP_ENV=local)
+    │   └── js/confirm-submit.js   # Pide confirmación en los formularios con data-confirm
     ├── includes/            # Código compartido, no accesible por URL
     │   ├── connection.php               # Crea $pdo (PDO)
     │   ├── helpers.php                  # environment(), escape(), log_exception()
     │   ├── user-validation.php          # Campos, limpieza y validación (compartido)
-    │   ├── origin.php                   # Comprueba Origin/Referer contra APP_ORIGIN
+    │   ├── origin.php                   # Funciones puras: comprueban Origin/Referer contra APP_ORIGIN
+    │   ├── request-guard.php            # reject_foreign_origin(): el 403 de create, edit y delete
     │   ├── DatabaseConnectionException.php
     │   ├── layout/                      # header.php, footer.php
     │   └── partials/                    # users-list.php, user-form.php, user-not-found.php, action-error.php
+    ├── tests/               # Pruebas unitarias (unit.php); fuera de public/
     └── scripts/             # Solo consola
         ├── db-check.php
         └── info.php
@@ -147,13 +163,38 @@ Estructura objetivo al terminar el CRUD base: ver el Anexo E de [`plan.md`](plan
 
 ## Origen de la aplicación (`APP_ORIGIN`)
 
-`delete.php` solo acepta peticiones que vienen del propio sitio: compara la cabecera `Origin` (o, si falta, `Referer`) con `APP_ORIGIN` y responde **403** si no coincide, si falta o si es `null`. Es una capa contra peticiones enviadas desde otras páginas; no sustituye al token CSRF del módulo M6.
+Los POST de `create.php`, `edit.php` y `delete.php` solo se aceptan si vienen del propio sitio: `reject_foreign_origin()` (en `includes/request-guard.php`) compara la cabecera `Origin` (o, si falta, `Referer`) con `APP_ORIGIN` y responde **403** si no coincide, si falta o si es `null`, **antes** de mirar lo que se envía (ni siquiera se valida el id ni los campos). Es una capa contra peticiones enviadas desde otras páginas; no sustituye al token CSRF del módulo M6. Los GET no se comprueban.
 
 - `APP_ORIGIN` es el origen público de la aplicación: **esquema + host + puerto**, sin ruta (`http://localhost:8080`, `https://sitio.com`).
 - Es opcional: por defecto se deriva de `APP_PORT` (`http://localhost:${APP_PORT}`). Fíjalo en `.env` si usas otro host o HTTPS.
 - `localhost` y `127.0.0.1` son orígenes **distintos**: abre la aplicación con el mismo que `APP_ORIGIN`.
-- Si falta o no es un origen válido, la página responde 500 (error de configuración), no 403.
+- Si falta o no es un origen válido, las tres páginas responden 500 (error de configuración, registrado como `[config]`), no 403.
 - Tras cambiarlo, recrea el contenedor: `docker compose up -d`.
+
+## Entornos (`APP_ENV`)
+
+`APP_ENV` (por defecto `local`) decide dos cosas:
+
+- **Qué configuración de PHP se carga.** `docker/php/php.ini` es **segura por defecto**: `display_errors` y `display_startup_errors` apagados (los errores van solo al log y un fallo grave responde 500 con el cuerpo vacío). `docker/php/php.local.ini` (errores en pantalla y revalidación de archivos) solo se carga con `APP_ENV=local`, mediante `PHP_INI_SCAN_DIR` en `docker-compose.yml`. Cualquier otro valor, o uno mal escrito, queda en modo seguro.
+- **Si existe `status.php`**, que enseña versiones: solo en `local`.
+
+Tras cambiar `APP_ENV` en `.env`, recrea el contenedor con `docker compose up -d`. En `local` un error fatal se muestra en pantalla (y PHP responde 200: así se comporta con `display_errors` activo); en producción responde 500 sin cuerpo y el detalle queda en `docker compose logs php`.
+
+## Ediciones simultáneas
+
+El formulario de edición lleva un campo oculto `row_token`: una huella (sha256) del contenido de la fila al abrirlo. Al guardar se compara con la fila **tal como está ahora**; si no coincide, otra persona la modificó mientras tanto y la respuesta es un **409** que no guarda nada, conserva lo escrito y pide recargar. Si otra persona guarda exactamente los mismos valores no hay conflicto. Un envío sin `row_token` (por ejemplo con `curl`) se acepta como siempre. Queda un margen de milisegundos entre la comprobación y el `UPDATE`; cerrarlo del todo exigiría una columna de versión en la tabla.
+
+## Fechas y zona horaria
+
+Las fechas se **guardan en UTC** y se **muestran en la zona de la aplicación** (`date.timezone` de `docker/php/php.ini`, hoy `America/Bogota`):
+
+- El servidor de MySQL arranca con `--default-time-zone=+00:00` y cada conexión de la aplicación ejecuta `SET time_zone = '+00:00'`, así que no depende de la configuración del servidor.
+- `created_at` es `DATETIME` (no `TIMESTAMP`, que no admite fechas posteriores a 2038) y se convierte con `format_utc_datetime()` al mostrarlo.
+- Adminer y el cliente `mysql` enseñan la hora **en UTC**: es la que hay guardada.
+
+## Cabeceras de seguridad
+
+Nginx añade `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` y una `Content-Security-Policy` en **todas** las respuestas (también en los errores), y oculta su versión. La CSP solo permite JavaScript y CSS propios o de `cdn.jsdelivr.net`, y **no permite scripts ni estilos en línea**: por eso el botón Eliminar usa `data-confirm` y `js/confirm-submit.js` en lugar de un `onsubmit`. Si añades otra CDN, un script o un `<style>` en línea, hay que actualizar la política en `docker/nginx/default.conf` (y recargar con `docker compose exec nginx nginx -s reload`). Si algo no carga, la consola del navegador dice `Refused to ...` con la directiva que lo bloquea.
 
 ## Manejo de errores
 
@@ -164,6 +205,21 @@ El visitante siempre ve un mensaje genérico; el detalle va al log del contenedo
 | Conexión (clave mala, BD apagada) | `DatabaseConnectionException` | 503 | `[connection]` |
 | Consulta (SQL inválido) | `PDOException` | 500 | `[query]` |
 | Configuración (falta una variable) | `RuntimeException` | 500 | `[config]` |
+
+Códigos que devuelve la aplicación (regla: si el envío no se completó, nunca es 200):
+
+| HTTP | Cuándo |
+|------|--------|
+| 200 | Páginas normales |
+| 302 | Tras crear, editar o eliminar: redirección a `index.php?msg=...` |
+| 400 | `delete.php` con un id mal formado |
+| 403 | Un POST de `create.php`, `edit.php` o `delete.php` desde un origen que no es el propio sitio |
+| 404 | `edit.php` con un id inválido o inexistente; `status.php` fuera de `APP_ENV=local` |
+| 405 | `delete.php` con un método que no es POST (cabecera `Allow: POST`) |
+| 409 | Correo duplicado (el `UNIQUE` de la BD) o edición simultánea (otra persona modificó al usuario) |
+| 422 | Datos del formulario inválidos |
+| 500 | Fallo de consulta o de configuración |
+| 503 | La BD no está disponible |
 
 ## Hoja de ruta
 
@@ -187,7 +243,9 @@ El visitante siempre ve un mensaje genérico; el detalle va al log del contenedo
 - Si `8080` u `8081` están ocupados, cambia `APP_PORT` o `ADMINER_PORT` en `.env`.
 - Si cambias una variable de `.env`, recrea los contenedores con `docker compose up -d`.
 
-**El botón Eliminar responde "Origen no permitido" (403).** Estás abriendo la aplicación con un origen distinto de `APP_ORIGIN` (por ejemplo `http://127.0.0.1:8080` en lugar de `http://localhost:8080`, o un puerto distinto). Abre la dirección que coincide, o ajusta `APP_ORIGIN` en `.env` y ejecuta `docker compose up -d`.
+**Guardar, actualizar o eliminar responden "Origen no permitido" (403).** Estás abriendo la aplicación con un origen distinto de `APP_ORIGIN` (por ejemplo `http://127.0.0.1:8080` en lugar de `http://localhost:8080`, o un puerto distinto). Abre la dirección que coincide, o ajusta `APP_ORIGIN` en `.env` y ejecuta `docker compose up -d`.
+
+**La BD se creó antes del cambio de `created_at` (sigue siendo `TIMESTAMP`).** Los scripts de `database/` solo corren con el volumen vacío. Para migrarla sin perder datos: `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' <<< "ALTER TABLE users MODIFY created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;"` y `docker compose up -d` para que MySQL arranque en UTC. Los valores no cambian.
 
 **Tildes como `Ã³` al cargar datos.** El cliente `mysql` del contenedor se conecta como `latin1`. El seed lleva `SET NAMES utf8mb4;` al inicio; tras corregirlo hay que recrear la BD.
 

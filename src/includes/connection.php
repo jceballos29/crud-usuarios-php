@@ -20,6 +20,13 @@ $options = [
     // de valor. Sin esto, guardar sin modificar nada daría 0, igual que un id que no existe.
     // Pdo\Mysql existe desde PHP 8.4; PDO::MYSQL_ATTR_FOUND_ROWS está obsoleta desde PHP 8.5.
     Pdo\Mysql::ATTR_FOUND_ROWS => true,
+    // Máximo de segundos para conectar. Sin esto, una BD que no responde (colgada, no parada) hace
+    // esperar 30 s a cada petición y agota los procesos de PHP-FPM; con esto falla pronto con un 503.
+    PDO::ATTR_TIMEOUT => 5,
+    // La sesión de MySQL trabaja siempre en UTC, sea cual sea la configuración del servidor: las
+    // fechas se guardan en UTC y se convierten a la zona de la aplicación al mostrarlas
+    // (format_utc_datetime() en helpers.php).
+    Pdo\Mysql::ATTR_INIT_COMMAND => "SET time_zone = '+00:00'",
 ];
 
 try {

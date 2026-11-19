@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
+require_once __DIR__ . '/../includes/request-guard.php';
 
 $pageTitle = "Editar usuario";
 
@@ -13,6 +14,10 @@ $errors = []; // campo => mensaje (solo el primer error de cada campo)
 $errorMessage = null; // error general (BD, configuración...)
 $submitted = $_SERVER['REQUEST_METHOD'] === 'POST';
 
+if ($submitted) {
+    reject_foreign_origin(); // 403 si el POST no viene del propio sitio, antes de mirar el id o lo que envía
+}
+
 // El id se lee una sola vez y solo de la fuente que corresponde al método:
 // GET al abrir el formulario, POST al enviarlo. Nunca se mezclan.
 $rawId = $submitted ? ($_POST['id'] ?? null) : ($_GET['id'] ?? null);
@@ -20,6 +25,11 @@ $rawId = $submitted ? ($_POST['id'] ?? null) : ($_GET['id'] ?? null);
 // parse_user_id() devuelve el id como int, o null si no es válido (ausente, arreglo, texto,
 // con signo o espacios, o fuera de rango). Ver includes/user-validation.php.
 $userId = parse_user_id($rawId);
+
+// Huella de la fila con la que se abrió el formulario (la trae el POST). Si la BD falla, el formulario
+// que se vuelve a pintar la conserva; si no llega, simplemente no se comprueba (curl, scripts).
+$submittedToken = $submitted && is_string($_POST['row_token'] ?? null) && $_POST['row_token'] !== '' ? $_POST['row_token'] : null;
+$rowToken = $submittedToken;
 
 $notFound = $userId === null; // id inválido: el inexistente se detecta más abajo con el SELECT
 $loaded = false;               // true cuando el usuario se cargó de la BD
@@ -43,8 +53,16 @@ if (!$notFound) {
             $notFound = true;
         } else {
             $loaded = true;
+            $currentToken = user_row_token($user);
+            $rowToken = $submittedToken ?? $currentToken;
 
-            if ($submitted) {
+            if ($submitted && !hash_equals($currentToken, $rowToken)) {
+                // Edición simultánea: la fila ya no es la que se mostró al abrir el formulario. No se
+                // guarda nada. Se conserva lo escrito y la huella VIEJA: hay que recargar para ver los
+                // datos actuales y volver a aplicar los cambios a propósito.
+                http_response_code(409);
+                $errorMessage = 'Otra persona modificó a este usuario mientras lo editabas. Recarga la página para ver los datos actuales: tus cambios no se han guardado.';
+            } elseif ($submitted) {
                 $errors = validate_user($data, $fields);
 
                 if ($errors === []) {
@@ -81,25 +99,16 @@ if (!$notFound) {
                 ];
             }
         }
-    } catch (DatabaseConnectionException $error) {
-        http_response_code(503);
-        $errorMessage = 'No se pudo conectar a la base de datos. Inténtalo más tarde.';
-        log_exception('connection', $error);
-    } catch (PDOException $error) {
+    } catch (RuntimeException $error) {
         // 1062 = correo duplicado (UNIQUE). Aquí significa que lo usa otro usuario:
         // guardar sin cambiar el correo no choca, el registro no entra en conflicto consigo mismo.
-        if (($error->errorInfo[1] ?? null) === 1062) {
+        if ($error instanceof PDOException && ($error->errorInfo[1] ?? null) === 1062) {
             http_response_code(409);
             $errors['email'] = 'Ya existe otro usuario registrado con ese correo.';
         } else {
-            http_response_code(500);
-            $errorMessage = 'No se pudo completar la operación. Inténtalo más tarde.';
-            log_exception('query', $error);
+            [$status, $errorMessage] = describe_failure($error, 'No se pudo completar la operación. Inténtalo más tarde.');
+            http_response_code($status);
         }
-    } catch (RuntimeException $error) {
-        http_response_code(500);
-        $errorMessage = 'Ocurrió un error inesperado. Inténtalo más tarde.';
-        log_exception('config', $error);
     }
 }
 

@@ -4,7 +4,9 @@ CREATE TABLE IF NOT EXISTS users (
     last_name VARCHAR(100) NOT NULL,
     email VARCHAR(254) NOT NULL,
     phone VARCHAR(20) DEFAULT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Fecha en UTC (la conexión de la app y el servidor trabajan en UTC). DATETIME y no TIMESTAMP:
+    -- TIMESTAMP no admite fechas posteriores al 2038-01-19.
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     PRIMARY KEY (id),
     UNIQUE KEY unique_email (email)

@@ -6,37 +6,14 @@ require_once __DIR__ . '/../includes/helpers.php';
 
 $pageTitle = "Inicio";
 $users = [];
-$confirmTexts = [];
 $errorMessage = null;
 
 try {
     require_once __DIR__ . '/../includes/connection.php';
     $users = $pdo->query('SELECT id, name, last_name, email, phone, created_at FROM users ORDER BY id DESC')->fetchAll();
-
-    foreach ($users as $user) {
-        $confirmTexts[$user['id']] = json_encode(
-            sprintf('¿Eliminar a %s %s?', $user['name'], $user['last_name']),
-            JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
-        );
-    }
-    unset($user);
-} catch (DatabaseConnectionException $error) {
-    http_response_code(503);
-    $errorMessage = 'No se pudo conectar a la base de datos. Inténtalo más tarde.';
-    log_exception('connection', $error);
-} catch (PDOException $error) {
-    http_response_code(500);
-    $errorMessage = 'No se pudieron obtener los usuarios. Inténtalo más tarde.';
-    log_exception('query', $error);
 } catch (RuntimeException $error) {
-    http_response_code(500);
-    $errorMessage = 'Ocurrió un error inesperado. Inténtalo más tarde.';
-    log_exception('config', $error);
-} catch (JsonException $error) {
-    http_response_code(500);
-    $users = [];
-    $errorMessage = 'No se pudo preparar la lista de usuarios. Inténtalo más tarde.';
-    log_exception('json', $error);
+    [$status, $errorMessage] = describe_failure($error, 'No se pudieron obtener los usuarios. Inténtalo más tarde.');
+    http_response_code($status);
 }
 
 $messages = [
@@ -61,7 +38,7 @@ require __DIR__ . '/../includes/layout/header.php';
 <?php if ($message !== null): ?>
     <div class="alert theme-<?= escape($messageTypes[$message] ?? 'success') ?>" role="alert">
         <p><?= escape($messages[$message]) ?></p>
-        <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert" aria-label="Close"></button>
+        <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert" aria-label="Cerrar"></button>
     </div>
 <?php endif; ?>
 
