@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/request-guard.php';
 require_once __DIR__ . '/../includes/session.php';
+require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/admin-auth.php';
 
 header('Cache-Control: no-store');
@@ -24,6 +25,16 @@ if (current_admin() !== null) {
 
 $email = '';
 $errorMessage = null;
+
+if ($submitted && !csrf_is_valid($_POST[CSRF_FIELD] ?? null)) {
+    // El token del formulario no es el de la sesión: la página se abrió hace mucho (la sesión caducó), se
+    // abrió en otro navegador, o el envío viene de otro sitio. No se procesa nada. A diferencia de las
+    // demás páginas (403 y texto plano), aquí se vuelve a pintar el formulario con un token nuevo: quien
+    // llega con la página caducada no debería ver una pantalla en blanco.
+    $submitted = false;
+    http_response_code(403);
+    $errorMessage = 'La página caducó o el envío no es válido. Vuelve a escribir tus datos.';
+}
 
 if ($submitted) {
     // Solo texto: login.php?email[]=x no debe romper nada. La contraseña NO se recorta (los espacios cuentan).
@@ -61,6 +72,10 @@ $messages = [
 ];
 $notice = $errorMessage === null && !$submitted && is_string($_GET['msg'] ?? null) ? ($messages[$_GET['msg']] ?? null) : null;
 
+// La sesión anónima que guarda el token CSRF se inicia AQUÍ, antes de imprimir nada: session_start() envía la
+// cookie en una cabecera, y las cabeceras ya no se pueden enviar cuando el HTML ha empezado a salir.
+csrf_token();
+
 require __DIR__ . '/../includes/layout/header.php';
 ?>
 
@@ -80,6 +95,7 @@ require __DIR__ . '/../includes/layout/header.php';
     <?php endif; ?>
 
     <form method="post" action="login.php" class="my-4">
+        <?= csrf_field() ?>
         <div class="form-field mb-3">
             <label for="email" class="form-label">Correo</label>
             <?php /* username: así el gestor de contraseñas del navegador sabe a qué cuenta pertenece la clave. */ ?>

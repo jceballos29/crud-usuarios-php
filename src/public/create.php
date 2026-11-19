@@ -6,13 +6,17 @@ require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/request-guard.php';
 require_once __DIR__ . '/../includes/session.php';
+require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/user-conflict.php';
 
-// Orden: origen (403) -> sesión (302 a login.php) -> lo demás. Primero «¿quién pide?», después «¿qué pide?».
+// Orden: origen (403) -> sesión (302 a login.php) -> token CSRF (403) -> lo demás. Primero «¿quién pide?», después «¿qué pide?».
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     reject_foreign_origin();
 }
 $currentAdmin = require_login();
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf(); // el token del formulario debe ser el de la sesión (M6)
+}
 
 $pageTitle = "Registrar";
 

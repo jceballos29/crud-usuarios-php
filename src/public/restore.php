@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/request-guard.php';
 require_once __DIR__ . '/../includes/session.php';
+require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
 
@@ -23,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 reject_foreign_origin();
 require_login(); // sin sesión no se toca nada: 302 a login.php (después del origen y antes de mirar el id)
+require_csrf();  // y sin el token de esa sesión tampoco: 403 (M6)
 
 try {
     $userId = parse_user_id($_POST['id'] ?? null);

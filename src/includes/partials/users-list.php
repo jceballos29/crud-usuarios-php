@@ -106,6 +106,7 @@ declare(strict_types=1);
                     <?php if ($isInactiveView): ?>
                         <?php /* Un eliminado no se edita: se restaura (POST, como eliminar). Vuelve a esta misma vista. */ ?>
                         <form method="post" action="restore.php" class="d-inline">
+                            <?= csrf_field() ?>
                             <input type="hidden" name="id" value="<?= escape($user['id']) ?>">
                             <?php foreach ($listState as $stateName => $stateValue): ?>
                                 <input type="hidden" name="<?= escape($stateName) ?>" value="<?= escape($stateValue) ?>">
@@ -117,6 +118,7 @@ declare(strict_types=1);
                             <a class="btn-subtle theme-warning btn-icon me-2" href="<?= escape('edit.php?' . http_build_query(['id' => $user['id']] + $listState, '', '&', PHP_QUERY_RFC3986)) ?>" role="button" title="Editar" aria-label="Editar a <?= escape($fullName) ?>"><i class="bi bi-pencil" aria-hidden="true"></i></a>
                             <?php /* data-confirm lo lee js/confirm-submit.js: sin onsubmit en línea (compatible con la CSP) y solo hace falta escapar para HTML. */ ?>
                             <form method="post" action="delete.php" class="d-inline" data-confirm="<?= escape(sprintf('¿Eliminar a %s?', $fullName)) ?>">
+                            <?= csrf_field() ?>
                                 <input type="hidden" name="id" value="<?= escape($user['id']) ?>">
                                 <?php foreach ($listState as $stateName => $stateValue): ?>
                                     <input type="hidden" name="<?= escape($stateName) ?>" value="<?= escape($stateValue) ?>">

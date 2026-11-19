@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/request-guard.php';
 require_once __DIR__ . '/../includes/session.php';
+require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/user-conflict.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
@@ -22,6 +23,9 @@ if ($submitted) {
     reject_foreign_origin(); // 403 si el POST no viene del propio sitio, antes de mirar el id o lo que envía
 }
 $currentAdmin = require_login(); // después del origen: sin sesión, 302 a login.php antes de tocar la BD
+if ($submitted) {
+    require_csrf(); // después de la sesión y antes de mirar el id o lo que envía (M6)
+}
 
 // Estado del listado al que se vuelve tras guardar o cancelar (búsqueda y página). Llega en la URL al
 // abrir el formulario y en campos ocultos al enviarlo, y se valida igual que en index.php. Son solo dos

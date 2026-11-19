@@ -29,6 +29,7 @@ declare(strict_types=1);
 <?php endif; ?>
 
 <form method="post" action="<?= escape($action) ?>" class="my-4">
+    <?= csrf_field() ?>
     <?php if ($userId !== null): ?>
         <input type="hidden" name="id" value="<?= escape($userId) ?>">
     <?php endif; ?>

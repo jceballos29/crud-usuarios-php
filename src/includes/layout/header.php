@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../helpers.php';
+require_once __DIR__ . '/../csrf.php';
 
 $page = $pageTitle ?? "Inicio";
 $title = "Gestión de usuarios | " . $page;
@@ -26,6 +27,7 @@ $title = "Gestión de usuarios | " . $page;
                 <?php if (($currentAdmin ?? null) !== null): ?>
                     <?php /* Quién está conectado y cómo salir. Cerrar sesión es un POST (ver logout.php). */ ?>
                     <form method="post" action="logout.php" class="d-flex align-items-center gap-2">
+                        <?= csrf_field() ?>
                         <span>Conectado como <strong><?= escape($currentAdmin['email']) ?></strong></span>
                         <button type="submit" class="btn-outline">Cerrar sesión</button>
                     </form>

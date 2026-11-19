@@ -25,7 +25,8 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | Mejora 3. Más campos (documento, nacimiento, rol) | Hecha (rama `mejora-3-mas-campos`) |
 | Mejora 4. Borrado lógico | Hecha (rama `mejora-4-borrado-logico`) |
 | Mejora 5. Inicio de sesión | Hecha (rama `mejora-5-login`) |
-| Mejoras 6 a 8 | Pendientes |
+| Mejora 6. Tokens CSRF | Hecha (rama `mejora-6-csrf`) |
+| Mejoras 7 y 8 | Pendientes |
 
 ## Qué se construye
 
@@ -144,7 +145,8 @@ crud-usuarios-docker/
 │   ├── smoke.sh             # Pruebas de punta a punta con curl
 │   ├── migration-001.sh     # Prueba de la migración 001 con bases temporales
 │   ├── migration-002.sh     # Prueba de la migración 002
-│   └── migration-003.sh     # Prueba de la migración 003
+│   ├── migration-003.sh     # Prueba de la migración 003
+│   └── csrf-demo/           # Página «atacante» y guía para ver CSRF en el navegador (M6)
 ├── database/
 │   ├── 01-schema.sql        # Tabla users (instalación nueva)
 │   ├── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql, 002-active.sql, 003-admins.sql)
@@ -168,6 +170,7 @@ crud-usuarios-docker/
     │   ├── user-search.php              # Funciones puras de la búsqueda (término, patrón LIKE, consultas de listado y recuento)
     │   ├── pagination.php               # Funciones puras de la paginación (página, rango, enlaces, URL del listado)
     │   ├── admin-auth.php               # Credenciales de administrador: validar, normalizar y authenticate_admin() (M5)
+    │   ├── csrf.php                     # Token CSRF por sesión: csrf_field(), require_csrf() (M6)
     │   ├── session.php                  # Sesión: cookie, caducidad, require_login() (M5)
     │   ├── user-conflict.php            # ¿El dueño de un correo/documento duplicado está eliminado? (avisos de M4)
     │   ├── request-guard.php            # reject_foreign_origin(): el 403 de create, edit, delete y restore
@@ -245,6 +248,16 @@ Toda la aplicación (listado, alta, edición, eliminar, restaurar) exige haber i
 - **Cerrar sesión:** botón en el encabezado, es un POST (`logout.php`). Las páginas protegidas llevan `Cache-Control: no-store`.
 - **Límites:** sin límite de intentos fallidos (el diseño está en `plan.md`), sin cambio de contraseña, sin token CSRF (mejora 6), y sin HTTPS la contraseña viaja en claro. El rol de `users` no concede permisos. `status.php` y Adminer no pasan por este login.
 - **Contraseñas:** de 10 a 72 bytes (bcrypt solo lee 72 y se corta en un byte NUL: se rechazan en vez de truncarlas).
+
+## Tokens CSRF
+
+Todos los formularios POST (login, crear y editar, eliminar, restaurar y cerrar sesión) llevan un campo oculto `csrf_token`: un valor al azar (32 bytes en hexadecimal) que vive **en la sesión del servidor**. Una página de otro sitio puede enviar un formulario a la aplicación y el navegador adjuntará tu cookie, pero no puede leer nuestras páginas y por eso no conoce el token.
+
+- **Qué pasa sin token válido:** **403** y no se cambia nada (también si es el de otra sesión, está truncado, va en mayúsculas, como arreglo, solo en la URL, en una cabecera o en una cookie: solo cuenta lo que llega en el cuerpo del POST). Orden: método (405), origen (403), sesión (302), **token (403)**, id (400), BD.
+- **Login:** si la página de entrada caducó, `login.php` responde 403 pero vuelve a pintar el formulario con un token nuevo y un aviso.
+- **Renovación:** el token cambia al iniciar sesión; es el mismo en todas las pestañas de una sesión.
+- **No sustituye a las otras capas** (comprobación de `Origin`, `SameSite=Lax`) ni protege contra XSS (un script inyectado en la página sí puede leerlo).
+- **Verlo en un navegador:** `tests/csrf-demo/` (página atacante y guía).
 
 ## Borrado lógico y usuarios eliminados
 

@@ -21,6 +21,7 @@ require_once __DIR__ . '/../includes/pagination.php';
 require_once __DIR__ . '/../includes/user-conflict.php';
 require_once __DIR__ . '/../includes/admin-auth.php';
 require_once __DIR__ . '/../includes/session.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 require_once __DIR__ . '/harness.php';
 
@@ -500,5 +501,14 @@ same('una marca que es texto no vale (solo enteros)', true, session_is_expired((
 same('un decimal no vale', true, session_is_expired((float) ($now - 1), $now));
 same('con otro tiempo límite (60 s)', [false, true], [session_is_expired($now - 59, $now, 60), session_is_expired($now - 60, $now, 60)]);
 same('el límite son 30 minutos', 1800, SESSION_IDLE_TIMEOUT);
+
+section('Mejora 6: csrf_is_valid() rechaza todo lo que no sea un texto (antes de tocar la sesión)');
+foreach ([null, '', [], ['a' => 'b'], 0, 123, true, false, 1.5, new stdClass()] as $weird) {
+    same('un ' . get_debug_type($weird) . ' (' . var_export($weird instanceof stdClass ? 'obj' : $weird, true) . ') no es un token', false, csrf_is_valid($weird));
+}
+same('un texto cualquiera sin sesión ni cookie tampoco (no hay con qué compararlo)', false, csrf_is_valid(str_repeat('a', 64)));
+same('el nombre del campo', 'csrf_token', CSRF_FIELD);
+same('el token son 32 bytes al azar: 64 caracteres hexadecimales', [32, 64], [CSRF_TOKEN_BYTES, CSRF_TOKEN_BYTES * 2]);
+same('hash_equals no es === : compara en tiempo constante y exige texto en ambos lados', [true, false], [hash_equals('abc', 'abc'), hash_equals('abc', 'abd')]);
 
 finish();

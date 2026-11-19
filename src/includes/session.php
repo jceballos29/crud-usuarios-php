@@ -138,6 +138,8 @@ function log_in_admin(array $admin): void
 {
     start_app_session();
     session_regenerate_id(true);
+    // Se REEMPLAZA todo $_SESSION: también se descarta el token CSRF de la sesión anónima, y el primer formulario
+    // de la sesión ya autenticada recibe uno nuevo (el que conociera quien vio la página de login no sirve).
     $_SESSION = ['admin_id' => $admin['id'], 'admin_email' => $admin['email'], 'last_seen' => time()];
 }
 
