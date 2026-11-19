@@ -91,7 +91,8 @@ foreach (phpFiles($root, 'views') as $file) {
 }
 
 section('Las vistas escapan lo que muestran');
-// Cada <?= debe llevar escape() o csrf_field() (HTML ya escapado), o estar en esta lista de salidas que son números o
+// Cada <?= debe llevar escape(), csrf_field() o icon() (marcado propio y fijo: icon() solo acepta nombres de una lista
+// cerrada), o estar en esta lista de salidas que son números o
 // textos fijos de la propia vista (nada que venga del visitante ni de la BD sin escapar). Una salida nueva sin escape
 // falla aquí y obliga a decidir: escaparla o añadirla a propósito.
 $fixedOutputs = [
@@ -107,6 +108,11 @@ $fixedOutputs = [
     "(string) \$optionValue === \$data[\$fieldName] ? ' selected' : ''",
     "extension_loaded(\$extension) ? '✔' : '✘'", "extension_loaded(\$extension) ? '' : '(falta)'",
     "\$database['ok'] ? 'success' : 'danger'",
+    "\$user->tone()",
+    "\$fieldName === 'email' ? ' field--wide' : ''",
+    "\$user->phone === null ? ' is-empty is-muted' : ''",
+    "\$user->document === null ? ' is-empty is-muted' : ''",
+    "\$user->birthDate === null ? ' is-empty is-muted' : ''",
 ];
 foreach (phpFiles($root, 'views') as $file) {
     $unsafe = [];
@@ -115,7 +121,7 @@ foreach (phpFiles($root, 'views') as $file) {
         if (preg_match_all('/<\?=\s*(.+?)\s*\?>/', $line, $matches)) {
             foreach ($matches[1] as $expr) {
                 $expr = str_replace('\\', '', $expr);
-                $safe = str_starts_with($expr, 'escape(') || $expr === 'csrf_field()' || in_array($expr, array_map(static fn(string $e): string => str_replace('\\', '', $e), $fixedOutputs), true);
+                $safe = str_starts_with($expr, 'escape(') || $expr === 'csrf_field()' || str_starts_with($expr, 'icon(') || in_array($expr, array_map(static fn(string $e): string => str_replace('\\', '', $e), $fixedOutputs), true);
 
                 if (!$safe) {
                     $unsafe[] = 'línea ' . ($n + 1) . ': ' . $expr;

@@ -10,10 +10,11 @@ declare(strict_types=1);
  * @var string $errorMessage Aviso para el visitante (sin detalles técnicos).
  */
 ?>
-<div class="my-8 px-6">
-    <h1 class="mb-4"><?= escape($errorTitle) ?></h1>
-    <div class="alert theme-danger" role="alert">
+<div class="narrow">
+    <div class="panel empty">
+        <span class="empty__icon"><?= icon('alert') ?></span>
+        <h1><?= escape($errorTitle) ?></h1>
         <p><?= escape($errorMessage) ?></p>
+        <a class="btn btn--primary" href="index.php"><?= icon('arrow-left') ?>Volver al listado</a>
     </div>
-    <a class="btn-solid theme-primary" href="index.php" role="button">Volver al listado</a>
 </div>

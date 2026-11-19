@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 $year = date('Y');
 ?>
-</main>
-<footer class="footer bg-2 fg-2">
-    <div class="container d-flex align-items-center justify-content-between py-2">
-        <span class="navbar-brand mb-0 h4">Gestión de usuarios</span>
-        <small>Politécnico Internacional &copy; <?= escape($year) ?></small>
-    </div>
-</footer>
-<script src="/js/confirm-submit.js" defer></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/bootstrap@6.0.0-alpha.1/dist/js/bootstrap.bundle.min.js" integrity="sha384-1a/pXj49ZQ1aHEmrJ+gMw1otqoVsYwlEnlD8mIfY2TV03r20Y0CN7uqx1tQogjPL" crossorigin="anonymous"></script>
+        </div>
+    </main>
+    <footer class="footer">
+        <div class="shell footer__inner">
+            <span>Gestión de usuarios</span>
+            <span>Politécnico Internacional &copy; <?= escape($year) ?></span>
+        </div>
+    </footer>
+    <script src="<?= escape(asset('js/app.js')) ?>" defer></script>
 </body>
 
 </html>

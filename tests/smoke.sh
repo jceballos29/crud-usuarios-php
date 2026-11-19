@@ -162,7 +162,7 @@ printf '%s' "$COOKIE_LINE" | grep -qE 'crud_session=[0-9a-z,-]{20,}'; ok "...con
 SID=$(awk '$6=="crud_session"{print $7}' "$J2")
 achk "con la sesión: GET /" 200 -b "$J2" "$BASE/"
 T2=$(grep -oE 'name="csrf_token" value="[0-9a-f]{64}"' "$TMP/body" | head -1 | grep -oE '[0-9a-f]{64}')
-grep -qF 'Conectado como <strong>smoke-admin@example.com</strong>' "$TMP/body"; ok "el encabezado dice quién está conectado" $?
+tr -d '\n' < "$TMP/body" | sed -E 's/\s+/ /g' | grep -qF '<span class="visually-hidden">Conectado como</span> <span class="session__email">smoke-admin@example.com</span>'; ok "el encabezado dice quién está conectado" $?
 tr -d '\n' < "$TMP/body" | grep -qE '<form method="post" action="logout.php"[^>]*>.*Cerrar sesión'; ok "...y ofrece «Cerrar sesión» como formulario POST" $?
 [ "$(header_of cache-control)" = "Cache-Control: no-store" ]; ok "las páginas protegidas llevan Cache-Control: no-store (el botón «atrás» no las enseña tras salir)" $?
 achk "con la sesión: GET login.php" 302 -b "$J2" "$BASE/login.php"
@@ -326,6 +326,24 @@ achk "logout con el token correcto" 302 -b "$TMP/jar_lg" -c "$TMP/jar_lg" -H "Or
 login_jar "$TMP/jar_lg"
 achk "tras salir y entrar de nuevo, el token VIEJO ya no sirve" 403 -b "$TMP/jar_lg" -H "Origin: $ORIGIN" -d "csrf_token=$NEW_LG&id=$VICTIM" "$BASE/delete.php"
 
+section "Interfaz propia (sin Bootstrap ni CDN)"
+chk "GET /css/app.css" 200 "$BASE/css/app.css"
+grep -qi 'text/css' "$TMP/head"; ok "se sirve como text/css" $?
+[ "$(wc -c < "$TMP/body")" -gt 5000 ]; ok "la hoja de estilos tiene contenido" $?
+! grep -qE 'url\(["'"'"']?https?://|@import' "$TMP/body"; ok "no importa nada de fuera (ni @import ni url(http...))" $?
+grep -qF 'prefers-color-scheme: dark' "$TMP/body" && grep -qF 'prefers-reduced-motion' "$TMP/body"; ok "respeta el modo oscuro y el movimiento reducido" $?
+chk "GET /img/icons.svg" 200 "$BASE/img/icons.svg"
+grep -qi 'image/svg+xml' "$TMP/head"; ok "los iconos son un SVG propio" $?
+[ "$(grep -c '<symbol id=' "$TMP/body")" -ge 15 ]; ok "...con todos sus símbolos" $?
+chk "el listado enlaza el SVG de iconos" 200 "$BASE/"
+grep -q '<use href="/img/icons.svg?v=[0-9]\+#i-' "$TMP/body"; ok "...con la fecha del archivo" $?
+grep -q 'class="skip-link" href="#contenido"' "$TMP/body" && grep -q '<main class="main" id="contenido"' "$TMP/body"; ok "hay un enlace «Saltar al contenido» y su destino" $?
+! grep -qE 'style="|<style' "$TMP/body"; ok "sin estilos en línea (lo exige la CSP)" $?
+[ "$(grep -c 'aria-hidden="true" focusable="false"' "$TMP/body")" -ge 1 ] && ! grep -qE '<svg class="icon"[^>]*role=' "$TMP/body"; ok "los iconos son decorativos (aria-hidden)" $?
+chk "GET /js/app.js sin eval ni innerHTML" 200 "$BASE/js/app.js"
+! grep -qE 'innerHTML|eval\(|document\.write' "$TMP/body"; ok "el JavaScript no usa innerHTML, eval ni document.write" $?
+grep -q 'showModal' "$TMP/body"; ok "la confirmación es un <dialog> propio" $?
+
 section "Páginas y cabeceras de seguridad"
 chk "GET /" 200 "$BASE/"
 for h in x-content-type-options x-frame-options content-security-policy referrer-policy; do
@@ -336,15 +354,17 @@ header_of server | grep -qE 'nginx/[0-9]'; [ $? -ne 0 ]; ok "Server no revela la
 curl -s "$BASE/" > "$TMP/index.html"
 [ "$(grep -cE '\son[a-z]+="' "$TMP/index.html")" = 0 ]; ok "el listado no tiene manejadores en línea (onsubmit, onclick...)" $?
 [ "$(grep -cE '<style|\sstyle=' "$TMP/index.html")" = 0 ]; ok "el listado no tiene estilos en línea" $?
-[ "$(grep -c 'integrity=' "$TMP/index.html")" -ge 3 ]; ok "las 3 CDN llevan integrity" $?
-chk "GET /js/confirm-submit.js" 200 "$BASE/js/confirm-submit.js"
+! grep -qE '(src|href)="https?://' "$TMP/index.html"; ok "la página no carga nada de fuera (ni CDN ni fuentes): todo es propio" $?
+grep -q 'href="/css/app.css?v=[0-9]\+"' "$TMP/index.html"; ok "la hoja de estilos propia se enlaza con su fecha (se renueva sola al cambiar)" $?
+! grep -qiE 'bootstrap|data-bs-|bi bi-' "$TMP/index.html"; ok "no queda rastro de Bootstrap en el HTML" $?
+chk "GET /js/app.js" 200 "$BASE/js/app.js"
 header_of content-type | grep -qiE 'javascript'; ok "el JavaScript se sirve como JavaScript" $?
 chk "GET /status.php (solo en APP_ENV=local)" 200 "$BASE/status.php"
 chk "GET /.env (nginx lo bloquea)" 403 "$BASE/.env"
-chk "GET /?msg=created" 200 "$BASE/?msg=created"; grep -q 'alert theme-success' "$TMP/body"; ok "created: aviso verde" $?
-chk "GET /?msg=missing" 200 "$BASE/?msg=missing"; grep -q 'alert theme-info' "$TMP/body"; ok "missing: aviso azul" $?
+chk "GET /?msg=created" 200 "$BASE/?msg=created"; grep -q 'notice--success' "$TMP/body"; ok "created: aviso verde" $?
+chk "GET /?msg=missing" 200 "$BASE/?msg=missing"; grep -q 'notice--info' "$TMP/body"; ok "missing: aviso azul" $?
 chk "GET /?msg[]=x (un arreglo)" 200 "$BASE/?msg%5B%5D=x"
-chk "GET /?msg=<b>x</b> (valor raro)" 200 "$BASE/?msg=%3Cb%3Ex%3C/b%3E"; ! grep -qE 'alert theme-(success|info)' "$TMP/body"; ok "un valor raro no muestra aviso" $?
+chk "GET /?msg=<b>x</b> (valor raro)" 200 "$BASE/?msg=%3Cb%3Ex%3C/b%3E"; ! grep -qE 'notice--(success|info)' "$TMP/body"; ok "un valor raro no muestra aviso" $?
 
 section "Configuración de PHP y de la imagen"
 APP_ENV_NOW=$(docker compose exec -T php sh -c 'echo $APP_ENV')
@@ -387,7 +407,7 @@ curl -s "$BASE/" > "$TMP/index.html"
 grep -q 'data-confirm="¿Eliminar a O&#039;Brien Prueba?"' "$TMP/index.html"; ok "data-confirm con apóstrofe, escapado para HTML" $?
 grep -q 'aria-label="Eliminar a O&#039;Brien Prueba"' "$TMP/index.html"; ok "el botón de eliminar dice a quién (aria-label)" $?
 grep -q 'aria-label="Editar a O&#039;Brien Prueba"' "$TMP/index.html"; ok "el botón de editar dice a quién (aria-label)" $?
-SHOWN=$(tr -d '\n' < "$TMP/index.html" | grep -oE '<td>O&#039;Brien</td>.{0,300}' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8}' | head -1)
+SHOWN=$(tr -d '\n' < "$TMP/index.html" | grep -oE 'person__name">O&#039;Brien Prueba</span>.{0,900}' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8}' | head -1)
 [ "$(docker compose exec -T php php -r 'echo abs(time() - strtotime($argv[1])) < 180 ? "ok" : "mal";' -- "$SHOWN")" = ok ]; ok "la fecha mostrada ($SHOWN) es la hora local actual, no UTC" $?
 STORED=$(sql "SELECT created_at FROM users WHERE id=$UO;")
 [ "$(docker compose exec -T php php -r 'echo abs(time() - strtotime($argv[1] . " UTC")) < 180 ? "ok" : "mal";' -- "$STORED")" = ok ]; ok "la BD guarda la fecha en UTC ($STORED)" $?
@@ -424,9 +444,9 @@ grep -q 'value="zzzz-no-existe"' "$TMP/body"; ok "el campo conserva lo que se es
 chk "q vacío" 200 --get --data-urlencode "q=" "$BASE/"; shows "Núñez-Smoke"; ok "q vacío lista todo" $?
 ! shows "Limpiar búsqueda"; ok "...y sin búsqueda no hay enlace \"Limpiar búsqueda\"" $?
 grep -q 'role="search"' "$TMP/body" && grep -q 'name="q"' "$TMP/body" && grep -q 'type="search"' "$TMP/body"; ok "el formulario es un GET de role=search con un campo type=search name=q" $?
-tr -d '\n' < "$TMP/body" | grep -qE '<form method="get" action="index.php" role="search"'; ok "...que usa el método GET (la URL se puede compartir)" $?
+tr -d '\n' < "$TMP/body" | grep -qE '<form class="search" method="get" action="index.php" role="search"'; ok "...que usa el método GET (la URL se puede compartir)" $?
 chk "q[]=x (un arreglo)" 200 "$BASE/?q%5B%5D=x"; shows "Núñez-Smoke"; ok "un arreglo cuenta como \"sin búsqueda\" y lista todo" $?
-chk "q junto con msg" 200 "$BASE/?q=zoe&msg=created"; shows "Núñez-Smoke" && grep -q 'alert theme-success' "$TMP/body"; ok "q y msg conviven: resultados y aviso" $?
+chk "q junto con msg" 200 "$BASE/?q=zoe&msg=created"; shows "Núñez-Smoke" && grep -q 'notice--success' "$TMP/body"; ok "q y msg conviven: resultados y aviso" $?
 search "' OR '1'='1"; shows "No se encontraron resultados"; ok "un intento de inyección es texto literal: sin resultados" $?
 search "'; DROP TABLE users; --"; [ "$(sql 'SELECT COUNT(*) FROM users;')" -ge 5 ]; ok "...y la tabla users sigue ahí" $?
 tr -d '\n' < "$TMP/body" | grep -qF "No se encontraron resultados para «&#039;; DROP TABLE users; --»"; ok "...y el texto se muestra escapado" $?
@@ -446,20 +466,20 @@ page_of() { chk "q=smoke-pag page=$1" 200 --get --data-urlencode "q=smoke-pag" -
 page_of 1; [ "$(rows)" = 10 ]; ok "página 1: 10 filas" $?
 flat | grep -qF "25 resultados para «smoke-pag»"; ok "...el resumen cuenta los 25 (no los 10 de la página)" $?
 flat | grep -qF "Mostrando 1 a 10."; ok "...y dice qué filas muestra (1 a 10)" $?
-grep -qF '<span class="page-link">Anterior</span>' "$TMP/body"; ok "...\"Anterior\" está deshabilitado (un <span>, no un enlace)" $?
-grep -qF 'href="index.php?q=smoke-pag&amp;page=2" rel="next">Siguiente</a>' "$TMP/body"; ok "...\"Siguiente\" lleva a la 2 y conserva la búsqueda" $?
+flat | grep -qE 'pager__item--disabled"><span class="pager__link">.{0,260}Anterior</span></span>'; ok "...\"Anterior\" está deshabilitado (un <span>, no un enlace)" $?
+flat | grep -qE 'href="index.php\?q=smoke-pag&amp;page=2" rel="next"><span class="pager__label">Siguiente'; ok "...\"Siguiente\" lleva a la 2 y conserva la búsqueda" $?
 grep -qF 'aria-current="page">1</span>' "$TMP/body"; ok "...la página actual (1) está marcada con aria-current" $?
 [ "$(grep -c 'aria-current="page"' "$TMP/body")" = 1 ]; ok "...y solo una página está marcada" $?
-tr -d '\n' < "$TMP/body" | grep -qF '<nav aria-label="Paginación del listado de usuarios">'; ok "...la navegación es un <nav> con nombre accesible" $?
+tr -d '\n' < "$TMP/body" | grep -qF '<nav class="pager" aria-label="Paginación del listado de usuarios">'; ok "...la navegación es un <nav> con nombre accesible" $?
 IDS1=$(ids)
 page_of 2; [ "$(rows)" = 10 ]; ok "página 2: 10 filas" $?
 flat | grep -qF "Mostrando 11 a 20."; ok "...resumen 11 a 20" $?
-grep -qF 'href="index.php?q=smoke-pag" rel="prev">Anterior</a>' "$TMP/body"; ok "...\"Anterior\" lleva a la 1 SIN ?page=1 (cada estado tiene una sola URL)" $?
-grep -qF 'href="index.php?q=smoke-pag&amp;page=3" rel="next">Siguiente</a>' "$TMP/body"; ok "...\"Siguiente\" lleva a la 3" $?
+flat | grep -qE 'href="index.php\?q=smoke-pag" rel="prev">.{0,260}Anterior</span></a>'; ok "...\"Anterior\" lleva a la 1 SIN ?page=1 (cada estado tiene una sola URL)" $?
+flat | grep -qE 'href="index.php\?q=smoke-pag&amp;page=3" rel="next"><span class="pager__label">Siguiente'; ok "...\"Siguiente\" lleva a la 3" $?
 IDS2=$(ids)
 page_of 3; [ "$(rows)" = 5 ]; ok "página 3 (la última): 5 filas" $?
 flat | grep -qF "Mostrando 21 a 25."; ok "...resumen 21 a 25" $?
-grep -qF '<span class="page-link">Siguiente</span>' "$TMP/body"; ok "...\"Siguiente\" está deshabilitado en la última" $?
+flat | grep -qE 'pager__item--disabled"><span class="pager__link"><span class="pager__label">Siguiente'; ok "...\"Siguiente\" está deshabilitado en la última" $?
 IDS3=$(ids)
 ALL=$(printf '%s\n%s\n%s\n' "$IDS1" "$IDS2" "$IDS3")
 [ "$(printf '%s\n' "$ALL" | grep -c .)" = 25 ] && [ "$(printf '%s\n' "$ALL" | sort -u | grep -c .)" = 25 ]; ok "las 3 páginas suman 25 usuarios distintos: ni huecos ni repeticiones" $?
@@ -468,7 +488,7 @@ for bad in 4 999 99999999999999999999999; do page_of "$bad"; [ "$(rows)" = 5 ] &
 for bad in 0 abc -3 1.5 " 2" "+2" ""; do page_of "$bad"; [ "$(rows)" = 10 ] && flat | grep -qF "Mostrando 1 a 10."; ok "?page='$bad' cuenta como la página 1" $?; done
 chk "?page[]=2 (un arreglo)" 200 "$BASE/?q=smoke-pag&page%5B%5D=2"; flat | grep -qF "Mostrando 1 a 10."; ok "...cuenta como la página 1" $?
 page_of 2
-LINKS=$(tr -d '\n' < "$TMP/body" | grep -oE '<nav aria-label="Paginación.*</nav>' | grep -oE 'href="[^"]*"')
+LINKS=$(tr -d '\n' < "$TMP/body" | grep -oE '<nav class="pager" aria-label="Paginación.*</nav>' | grep -oE 'href="index.php[^"]*"')
 [ "$(printf '%s\n' "$LINKS" | grep -c .)" -ge 4 ] && ! printf '%s\n' "$LINKS" | grep -qv 'q=smoke-pag'; ok "TODOS los enlaces de la paginación conservan la búsqueda" $?
 chk "q con tildes y espacios, página 2" 200 --get --data-urlencode "q=smoke pag" --data-urlencode "page=2" "$BASE/"; ok "(el espacio de «smoke pag» no encuentra nada, pero no rompe)" 0
 chk "una sola página no pinta la navegación" 200 --get --data-urlencode "q=smoke-busq" "$BASE/"; ! grep -qF 'aria-label="Paginación' "$TMP/body"; ok "...la búsqueda de 5 resultados no tiene <nav>" $?
@@ -506,8 +526,8 @@ done
 [ "$(header_of location)" = "Location: index.php?msg=deleted&q=smoke-pag&page=3" ]; ok "al borrar al ÚLTIMO de la página 3, el Location sigue apuntando a la página 3 (que ya no existe)..." $?
 chk "...y al seguir esa redirección" 200 "$BASE/index.php?msg=deleted&q=smoke-pag&page=3"
 flat | grep -qF "Mostrando 11 a 20." && [ "$(rows)" = 10 ] && grep -qF 'aria-current="page">2</span>' "$TMP/body"; ok "...se muestra la nueva última página (la 2) con 10 usuarios, no una vacía" $?
-grep -q 'alert theme-success' "$TMP/body"; ok "...y el aviso de eliminado se ve" $?
-! grep -qF '<span class="page-link">Siguiente</span>' "$TMP/body" || true; grep -qF '<span class="page-link">Siguiente</span>' "$TMP/body"; ok "...con \"Siguiente\" deshabilitado, porque ya es la última" $?
+grep -q 'notice--success' "$TMP/body"; ok "...y el aviso de eliminado se ve" $?
+flat | grep -qE 'pager__item--disabled"><span class="pager__link"><span class="pager__label">Siguiente'; ok "...con \"Siguiente\" deshabilitado, porque ya es la última" $?
 page_of 3; [ "$(rows)" = 10 ]; ok "pedir la 3 directamente también muestra la 2 (ya solo hay 20)" $?
 chk "eliminar sin estado (como antes de M2)" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$(printf '%s\n' "$IDS1" | head -1)" "$BASE/delete.php"
 [ "$(header_of location)" = "Location: index.php?msg=deleted" ]; ok "...sin estado sigue yendo a index.php?msg=deleted" $?
@@ -602,10 +622,10 @@ chk "documento de 21 caracteres" 422 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&n
 
 section "Más campos (M3): listado y búsqueda"
 chk "listado buscando por documento (en minúsculas y a medias)" 200 --get --data-urlencode "q=b-123" "$BASE/"
-[ "$(grep -c 'edit.php?id=' "$TMP/body")" = 1 ] && grep -qF '<td>AB-12345</td>' "$TMP/body"; ok "la búsqueda encuentra por documento y lo muestra" $?
-tr -d '\n' < "$TMP/body" | grep -qE '<td>AB-12345</td>\s*<td>1990-05-17</td>\s*<td>Editor</td>'; ok "...con la fecha y la ETIQUETA del rol (Editor)" $?
+[ "$(grep -c 'edit.php?id=' "$TMP/body")" = 1 ] && grep -qF 'data-label="Documento" class="num">AB-12345</td>' "$TMP/body"; ok "la búsqueda encuentra por documento y lo muestra" $?
+tr -d '\n' < "$TMP/body" | grep -qE 'data-label="Documento" class="num">AB-12345</td>\s*<td data-label="Nacimiento" class="col-secondary num">1990-05-17</td>\s*<td data-label="Rol"><span class="tag tag--editor">Editor</span></td>'; ok "...con la fecha y la ETIQUETA del rol (Editor)" $?
 chk "listado de uno sin los campos nuevos" 200 --get --data-urlencode "q=smoke-m3-b" "$BASE/"
-tr -d '\n' < "$TMP/body" | grep -qE '<td>-</td>\s*<td>-</td>\s*<td>-</td>\s*<td>Usuario</td>'; ok "teléfono, documento y fecha vacíos se ven como «-» y el rol «Usuario»" $?
+tr -d '\n' < "$TMP/body" | grep -qE 'data-label="Teléfono" class="num is-empty is-muted">—</td>\s*<td data-label="Documento" class="num is-empty is-muted">—</td>\s*<td data-label="Nacimiento" class="col-secondary num is-empty is-muted">—</td>\s*<td data-label="Rol"><span class="tag tag--user">Usuario</span></td>'; ok "teléfono, documento y fecha vacíos se ven como «—» (y se ocultan en móvil) y el rol «Usuario»" $?
 
 section "Más campos (M3): edición, usuarios antiguos y ediciones simultáneas"
 chk "editar al usuario con todos los campos" 200 "$BASE/edit.php?id=$UA"
@@ -733,7 +753,7 @@ section "El estado se conserva en la vista de eliminados"
 sql "SET SESSION cte_max_recursion_depth = 100; INSERT INTO users (name, last_name, email, active) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 12) SELECT 'Elim', 'Pagina', CONCAT('smoke-m4-e', LPAD(i, 2, '0'), '@example.com'), 0 FROM n;" >/dev/null
 chk "eliminados, página 2" 200 --get --data-urlencode "view=inactive" --data-urlencode "q=smoke-m4-e" --data-urlencode "page=2" "$BASE/"
 [ "$(grep -c 'action="restore.php"' "$TMP/body")" = 2 ]; ok "12 eliminados: la página 2 tiene 2 filas" $?
-LINKS=$(tr -d '\n' < "$TMP/body" | grep -oE '<nav aria-label="Paginación.*</nav>' | grep -oE 'href="[^"]*"')
+LINKS=$(tr -d '\n' < "$TMP/body" | grep -oE '<nav class="pager" aria-label="Paginación.*</nav>' | grep -oE 'href="index.php[^"]*"')
 [ -n "$LINKS" ] && ! printf '%s\n' "$LINKS" | grep -qv 'view=inactive'; ok "los enlaces de página se quedan en la vista de eliminados" $?
 tr -d '\n' < "$TMP/body" | grep -qE 'name="view" value="inactive">\s*<input type="hidden" name="q" value="smoke-m4-e">\s*<input type="hidden" name="page" value="2">'; ok "el botón Restaurar lleva view, q y page" $?
 LAST2=$(grep -oE 'name="id" value="[0-9]+"' "$TMP/body" | grep -oE '[0-9]+')

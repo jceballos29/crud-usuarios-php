@@ -36,3 +36,35 @@ function format_utc_datetime(string $utc, ?string $timezone = null): string
 
     return $date->setTimezone($zone)->format('Y-m-d H:i:s');
 }
+
+/**
+ * URL de un archivo estático de public/ con la fecha de su última modificación (`/css/app.css?v=1730000000`): al
+ * cambiar el archivo cambia la URL y el navegador no sirve una copia vieja de su caché.
+ *
+ * @param string $path Ruta relativa a public/ (p. ej. 'css/app.css'); solo letras, números, / . _ -
+ */
+function asset(string $path): string
+{
+    $file = dirname(__DIR__) . '/public/' . $path;
+    $version = preg_match('#^[A-Za-z0-9/._-]+$#', $path) === 1 && is_file($file) ? (int) filemtime($file) : 0;
+
+    return '/' . $path . ($version > 0 ? '?v=' . $version : '');
+}
+
+/**
+ * Un icono de la hoja de iconos propia (public/img/icons.svg), como <svg> en línea que hereda el color del texto.
+ * Decorativo (aria-hidden): quien lo usa pone el texto accesible (aria-label o texto visible) en su botón o enlace.
+ * Solo acepta nombres de una lista cerrada: nunca se escribe en el HTML algo que venga de fuera.
+ *
+ * @param string $name Nombre sin el prefijo (p. ej. 'pencil').
+ */
+function icon(string $name): string
+{
+    static $known = ['search', 'plus', 'pencil', 'trash', 'undo', 'logout', 'x', 'chevron-left', 'chevron-right', 'check-circle', 'info', 'alert', 'archive', 'users', 'arrow-left', 'chevron-down'];
+
+    if (!in_array($name, $known, true)) {
+        throw new InvalidArgumentException("Icono desconocido: $name");
+    }
+
+    return '<svg class="icon" aria-hidden="true" focusable="false"><use href="' . asset('img/icons.svg') . '#i-' . $name . '"></use></svg>';
+}

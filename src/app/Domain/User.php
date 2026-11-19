@@ -59,6 +59,26 @@ final class User
         );
     }
 
+    /**
+     * Las iniciales para el «guijarro» de la interfaz: la primera letra del nombre y la del apellido, en mayúsculas
+     * («Laura Gómez» -> «LG»). Cuenta letras, no bytes: «Ángela» da «Á».
+     */
+    public function initials(): string
+    {
+        $first = static fn(string $text): string => mb_strtoupper(mb_substr(ltrim($text), 0, 1, 'UTF-8'), 'UTF-8');
+
+        return $first($this->name) . $first($this->lastName);
+    }
+
+    /**
+     * Uno de los 6 tonos de color del guijarro (1 a 6), siempre el mismo para la misma persona: sale del correo, que
+     * es único. No es un dato guardado ni un secreto: solo una forma estable de repartir colores.
+     */
+    public function tone(): int
+    {
+        return crc32(mb_strtolower($this->email, 'UTF-8')) % 6 + 1;
+    }
+
     /** Nombre y apellido juntos, como se muestra («Laura Gómez»). */
     public function fullName(): string
     {

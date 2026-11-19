@@ -11,18 +11,27 @@ declare(strict_types=1);
  * @var array<string, mixed> $form Variables del formulario compartido.
  */
 ?>
-<h1 class="mb-4">Editar usuario</h1>
-
-<?php if (!$showForm): ?>
-    <?php /* GET con la BD caída: no hay nada que mostrar ni que conservar, solo el aviso. */ ?>
-    <div class="alert theme-danger" role="alert">
-        <p><?= escape($errorMessage ?? 'No se pudo cargar el usuario.') ?></p>
+<div class="narrow">
+    <div class="form-head">
+        <?php if ($showForm && $user !== null): ?>
+            <span class="pebble pebble--lg pebble--<?= $user->tone() ?>" aria-hidden="true"><?= escape($user->initials()) ?></span>
+        <?php endif; ?>
+        <div>
+            <h1>Editar usuario</h1>
+            <?php if ($showForm && $user !== null): // El nombre viene de la BD (dato externo): siempre escapado. ?>
+                <p class="page-lead">Editando a <strong><?= escape($user->fullName()) ?></strong></p>
+            <?php endif; ?>
+        </div>
     </div>
-<?php else: ?>
-    <?php if ($user !== null): // El nombre viene de la BD (dato externo): siempre escapado. ?>
-        <p class="mb-2">Editando a <strong><?= escape($user->fullName()) ?></strong></p>
-    <?php endif; ?>
 
-    <?php /* POST con la BD caída: el formulario se conserva con lo escrito y el aviso. */ ?>
-    <?php App\View\View::render('users/form', $form); ?>
-<?php endif; ?>
+    <?php if (!$showForm): ?>
+        <?php /* GET con la BD caída: no hay nada que mostrar ni que conservar, solo el aviso. */ ?>
+        <div class="notice notice--danger" role="alert">
+            <span class="notice__icon"><?= icon('alert') ?></span>
+            <div class="notice__text"><p><?= escape($errorMessage ?? 'No se pudo cargar el usuario.') ?></p></div>
+        </div>
+    <?php else: ?>
+        <?php /* POST con la BD caída: el formulario se conserva con lo escrito y el aviso. */ ?>
+        <?php App\View\View::render('users/form', $form); ?>
+    <?php endif; ?>
+</div>

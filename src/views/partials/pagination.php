@@ -23,28 +23,28 @@ if ($pagination['pages'] <= 1) {
 $current = $pagination['page'];
 $last = $pagination['pages'];
 ?>
-<nav aria-label="Paginación del listado de usuarios">
-    <ul class="pagination">
+<nav class="pager" aria-label="Paginación del listado de usuarios">
+    <ul class="pager__list list-plain">
         <?php if ($current > 1): ?>
-            <li class="page-item"><a class="page-link" href="<?= escape(Pagination::listUrl($search, $current - 1, [], $view)) ?>" rel="prev">Anterior</a></li>
+            <li class="pager__item"><a class="pager__link" href="<?= escape(Pagination::listUrl($search, $current - 1, [], $view)) ?>" rel="prev"><?= icon('chevron-left') ?><span class="pager__label">Anterior</span></a></li>
         <?php else: ?>
-            <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+            <li class="pager__item pager__item--disabled"><span class="pager__link"><?= icon('chevron-left') ?><span class="pager__label">Anterior</span></span></li>
         <?php endif; ?>
 
         <?php foreach (Pagination::pageLinks($current, $last) as $number): ?>
             <?php if ($number === null): ?>
-                <li class="page-item disabled"><span class="page-link">…</span></li>
+                <li class="pager__item pager__item--gap"><span class="pager__link">…</span></li>
             <?php elseif ($number === $current): ?>
-                <li class="page-item active"><span class="page-link" aria-current="page"><?= $number ?></span></li>
+                <li class="pager__item pager__item--current"><span class="pager__link" aria-current="page"><?= $number ?></span></li>
             <?php else: ?>
-                <li class="page-item"><a class="page-link" href="<?= escape(Pagination::listUrl($search, $number, [], $view)) ?>" aria-label="Página <?= $number ?>"><?= $number ?></a></li>
+                <li class="pager__item"><a class="pager__link" href="<?= escape(Pagination::listUrl($search, $number, [], $view)) ?>" aria-label="Página <?= $number ?>"><?= $number ?></a></li>
             <?php endif; ?>
         <?php endforeach; ?>
 
         <?php if ($current < $last): ?>
-            <li class="page-item"><a class="page-link" href="<?= escape(Pagination::listUrl($search, $current + 1, [], $view)) ?>" rel="next">Siguiente</a></li>
+            <li class="pager__item"><a class="pager__link" href="<?= escape(Pagination::listUrl($search, $current + 1, [], $view)) ?>" rel="next"><span class="pager__label">Siguiente</span><?= icon('chevron-right') ?></a></li>
         <?php else: ?>
-            <li class="page-item disabled"><span class="page-link">Siguiente</span></li>
+            <li class="pager__item pager__item--disabled"><span class="pager__link"><span class="pager__label">Siguiente</span><?= icon('chevron-right') ?></span></li>
         <?php endif; ?>
     </ul>
 </nav>

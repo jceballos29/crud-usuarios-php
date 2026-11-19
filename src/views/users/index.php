@@ -15,12 +15,11 @@ declare(strict_types=1);
  */
 ?>
 <?php if ($message !== null): ?>
-    <div class="alert theme-<?= escape($messageType) ?>" role="alert">
-        <p><?= escape($message) ?></p>
-        <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+    <div class="notice notice--<?= escape($messageType) ?> mb-4" role="status">
+        <span class="notice__icon"><?= icon($messageType === 'info' ? 'info' : 'check-circle') ?></span>
+        <div class="notice__text"><p><?= escape($message) ?></p></div>
+        <button type="button" class="btn btn--icon notice__close" data-dismiss aria-label="Cerrar aviso"><?= icon('x') ?></button>
     </div>
 <?php endif; ?>
 
-<div class="my-8 px-6">
-    <?php App\View\View::render('users/list', ['errorMessage' => $errorMessage, 'users' => $users, 'search' => $search, 'view' => $view, 'pagination' => $pagination]); ?>
-</div>
+<?php App\View\View::render('users/list', ['errorMessage' => $errorMessage, 'users' => $users, 'search' => $search, 'view' => $view, 'pagination' => $pagination]); ?>

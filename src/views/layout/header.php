@@ -18,25 +18,32 @@ $title = "Gestión de usuarios | " . $page;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title><?= escape($title); ?></title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@6.0.0-alpha.1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-B/GM4XqrwHnWXNOWMbloTmrYXZg10cakYGmpfsR/bbzQ6JAJI4ihuyADKLnBgrCe" crossorigin="anonymous">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.2/font/bootstrap-icons.min.css" integrity="sha384-nWN3KqaaVcbEsCjLSV+2jMjh62Iny/+mN3srM8TZeM8N6aj7eDl5wwYggjAJ4/sJ" crossorigin="anonymous">
+    <link rel="stylesheet" href="<?= escape(asset('css/app.css')) ?>">
 </head>
 
 <body>
-    <header>
-        <nav class="navbar bg-2 fg-2">
-            <div class="container">
-                <a class="navbar-brand" href="index.php">Gestión de usuarios</a>
-                <?php if (($currentAdmin ?? null) !== null): ?>
-                    <?php /* Quién está conectado y cómo salir. Cerrar sesión es un POST (ver logout.php). */ ?>
-                    <form method="post" action="logout.php" class="d-flex align-items-center gap-2">
-                        <?= csrf_field() ?>
-                        <span>Conectado como <strong><?= escape($currentAdmin['email']) ?></strong></span>
-                        <button type="submit" class="btn-outline">Cerrar sesión</button>
-                    </form>
-                <?php endif; ?>
-            </div>
-        </nav>
+    <a class="skip-link" href="#contenido">Saltar al contenido</a>
+    <header class="topbar">
+        <div class="shell topbar__inner">
+            <a class="brand" href="index.php">
+                <svg class="brand__mark" aria-hidden="true" focusable="false"><use href="<?= escape(asset('img/icons.svg')) ?>#brand"></use></svg>
+                <span>Gestión de usuarios</span>
+            </a>
+            <?php if (($currentAdmin ?? null) !== null): ?>
+                <?php /* Quién está conectado y cómo salir. Cerrar sesión es un POST (ver logout.php). */ ?>
+                <form method="post" action="logout.php" class="session">
+                    <?= csrf_field() ?>
+                    <span class="session__who">
+                        <span class="pebble pebble--sm" aria-hidden="true"><?= escape(mb_strtoupper(mb_substr($currentAdmin['email'], 0, 1, 'UTF-8'), 'UTF-8')) ?></span>
+                        <span class="visually-hidden">Conectado como</span>
+                        <span class="session__email"><?= escape($currentAdmin['email']) ?></span>
+                    </span>
+                    <button type="submit" class="btn btn--quiet"><?= icon('logout') ?><span>Cerrar sesión</span></button>
+                </form>
+            <?php endif; ?>
+        </div>
     </header>
-    <main class="container my-12 py-12">
+    <main class="main" id="contenido" tabindex="-1">
+        <div class="shell">

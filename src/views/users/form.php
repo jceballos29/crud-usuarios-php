@@ -19,16 +19,18 @@ declare(strict_types=1);
  */
 ?>
 <?php if ($errorMessage !== null): ?>
-    <div class="alert theme-danger" role="alert">
-        <p><?= escape($errorMessage) ?></p>
+    <div class="notice notice--danger mb-4" role="alert">
+        <span class="notice__icon"><?= icon('alert') ?></span>
+        <div class="notice__text"><p><?= escape($errorMessage) ?></p></div>
     </div>
 <?php elseif ($errors !== []): ?>
-    <div class="alert theme-danger" role="alert">
-        <p>Revisa los campos marcados e inténtalo de nuevo.</p>
+    <div class="notice notice--danger mb-4" role="alert">
+        <span class="notice__icon"><?= icon('alert') ?></span>
+        <div class="notice__text"><p>Revisa los campos marcados e inténtalo de nuevo.</p></div>
     </div>
 <?php endif; ?>
 
-<form method="post" action="<?= escape($action) ?>" class="my-4">
+<form method="post" action="<?= escape($action) ?>" class="panel panel--form">
     <?= csrf_field() ?>
     <?php if ($userId !== null): ?>
         <input type="hidden" name="id" value="<?= escape($userId) ?>">
@@ -40,14 +42,17 @@ declare(strict_types=1);
         <input type="hidden" name="row_token" value="<?= escape($rowToken) ?>">
     <?php endif; ?>
 
+    <div class="form-grid">
     <?php foreach ($fields as $fieldName => $definition): ?>
         <?php $hasError = isset($errors[$fieldName]); ?>
-        <div class="form-field mb-3">
-            <label for="<?= escape($fieldName) ?>" class="form-label"><?= escape($definition['label']) ?></label>
+        <?php /* El correo ocupa todo el ancho; el resto va de dos en dos (en pantallas estrechas, una columna). */ ?>
+        <div class="field<?= $fieldName === 'email' ? ' field--wide' : '' ?>">
+            <label for="<?= escape($fieldName) ?>" class="field__label"><?= escape($definition['label']) ?></label>
             <?php if ($definition['type'] === 'select'): ?>
                 <?php /* Las opciones salen de la lista blanca del servidor; lo que llegue de vuelta se vuelve a validar. */ ?>
+                <div class="select">
                 <select
-                    class="form-select<?= $hasError ? ' is-invalid' : '' ?>"
+                    class="input"
                     id="<?= escape($fieldName) ?>"
                     name="<?= escape($fieldName) ?>"
                     autocomplete="off"
@@ -61,10 +66,12 @@ declare(strict_types=1);
                         <option value="<?= escape($optionValue) ?>"<?= (string) $optionValue === $data[$fieldName] ? ' selected' : '' ?>><?= escape($optionLabel) ?></option>
                     <?php endforeach; ?>
                 </select>
+                <?= icon('chevron-down') ?>
+                </div>
             <?php else: ?>
                 <input
                     type="<?= escape($definition['type']) ?>"
-                    class="form-control<?= $hasError ? ' is-invalid' : '' ?>"
+                    class="input"
                     id="<?= escape($fieldName) ?>"
                     name="<?= escape($fieldName) ?>"
                     value="<?= escape($data[$fieldName]) ?>"
@@ -75,13 +82,14 @@ declare(strict_types=1);
                     <?php if ($hasError): ?>aria-invalid="true" aria-describedby="<?= escape($fieldName) ?>-error" <?php endif; ?>>
             <?php endif; ?>
             <?php if ($hasError): ?>
-                <div class="invalid-feedback" id="<?= escape($fieldName) ?>-error"><?= escape($errors[$fieldName]) ?></div>
+                <p class="field__error" id="<?= escape($fieldName) ?>-error"><?= icon('alert') ?><span><?= escape($errors[$fieldName]) ?></span></p>
             <?php endif; ?>
         </div>
     <?php endforeach; ?>
+    </div>
 
-    <div class="d-grid gap-4 mt-10">
-        <button type="submit" class="btn-solid theme-primary"><?= escape($submitLabel) ?></button>
-        <a role="button" class="btn-solid" href="<?= escape($cancelUrl) ?>">Cancelar</a>
+    <div class="form-actions">
+        <button type="submit" class="btn btn--primary"><?= escape($submitLabel) ?></button>
+        <a class="btn btn--ghost" href="<?= escape($cancelUrl) ?>">Cancelar</a>
     </div>
 </form>

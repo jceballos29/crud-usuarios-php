@@ -183,7 +183,9 @@ crud-usuarios-docker/
     │   ├── logout.php       # Cierra la sesión, solo POST (M5)
     │   ├── restore.php      # Restaurar a un eliminado, solo POST y solo desde el propio sitio (M4)
     │   ├── status.php       # Diagnóstico del stack (solo APP_ENV=local)
-    │   └── js/confirm-submit.js   # Pide confirmación en los formularios con data-confirm
+    │   ├── css/app.css      # Hoja de estilos propia (tokens, componentes, modo oscuro): sin Bootstrap
+    │   ├── img/icons.svg    # Iconos propios (hoja de símbolos SVG)
+    │   └── js/app.js        # Diálogo de confirmación (<dialog>), avisos que se cierran y un solo envío
     ├── bootstrap.php        # Arranque común: carga el autoload de Composer (vendor/)
     ├── composer.json        # Autoload PSR-4 (App\ -> app/) y las funciones de app/. Sin dependencias de terceros
     ├── app/                 # El código de la aplicación (no accesible por URL), una responsabilidad por clase
@@ -260,6 +262,18 @@ Cada usuario tiene tres campos más (mejora 3): `document`, `birth_date` y `role
 - **Rol:** obligatorio, uno de `user` (Usuario, el valor por defecto), `editor` o `admin`. Solo una **etiqueta**: no da ningún permiso hasta el inicio de sesión (mejora 5). La lista válida está en `user_roles()` y debe coincidir con el `ENUM` de la BD (una prueba de integración lo comprueba).
 - **Migración:** una BD que ya tiene datos recibe las columnas con `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/migrations/001-more-fields.sql`. Se aplica **una sola vez** (la segunda falla sin cambiar nada). Los usuarios existentes quedan con documento y fecha vacíos y rol `user`. Una instalación nueva ya trae las columnas por `01-schema.sql`: hay que mantener las dos cosas a la vez.
 - **Los envíos sin `role`** (por ejemplo con `curl`, como antes de esta mejora) responden 422.
+
+## Interfaz
+
+La interfaz usa una **hoja de estilos propia** (`src/public/css/app.css`, sin Bootstrap ni ninguna librería) y no depende de internet.
+
+- **Dirección:** tranquila y orgánica: neutros con un matiz verde de liquen, un único acento pino, esquinas redondeadas de varios tamaños y, como detalle propio, las **iniciales de cada persona en «guijarros»** de forma ligeramente irregular (el color sale del correo, así que una persona siempre tiene el mismo). Tipografía del sistema (sin descargar fuentes).
+- **Tokens:** todos los colores, radios y tiempos están al principio de `app.css` como variables (`--primary`, `--surface`, `--r-lg`...). Cambiar el acento es cambiar `--primary` (y su par oscuro dentro de `@media (prefers-color-scheme: dark)`).
+- **Modo oscuro** automático (según el sistema) y **movimiento reducido** respetado. Contraste de texto de 4,5:1 o más y borde de los campos de 3:1 o más (medidos con un script), foco visible en todo, enlace «Saltar al contenido», formularios con etiquetas y errores asociados (`aria-describedby`, `aria-invalid`).
+- **Pantallas:** en escritorio el listado es una tabla; por debajo de 1000 px se ocultan las columnas secundarias (nacimiento y creación) y por debajo de 720 px cada fila pasa a una tarjeta. Los formularios van en una columna estrecha de 40 rem, de dos en dos columnas en pantallas anchas.
+- **Iconos:** `img/icons.svg` (trazo lineal); `icon('nombre')` (en `app/support.php`) los pinta y solo acepta una lista cerrada de nombres. `asset('css/app.css')` añade la fecha del archivo a la URL (`?v=...`), así que un cambio de estilos se ve al recargar sin vaciar la caché.
+- **JavaScript** (`public/js/app.js`, sin dependencias): la confirmación de eliminar es un `<dialog>` propio (Escape o un clic fuera lo cancelan, el foco empieza en «Cancelar»; sin `<dialog>` usa `confirm()`), los avisos se cierran con su botón y un formulario enviado desactiva sus botones para que un doble clic no lo envíe dos veces.
+- **Probado** con Playwright en Firefox (escritorio, tableta y móvil, modo claro y oscuro, teclado y movimiento reducido) y con `tests/smoke.sh`. **No se ha probado en Chrome ni en Safari.**
 
 ## Arquitectura (por capas)
 
@@ -351,7 +365,7 @@ Las fechas se **guardan en UTC** y se **muestran en la zona de la aplicación** 
 
 ## Cabeceras de seguridad
 
-Nginx añade `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` y una `Content-Security-Policy` en **todas** las respuestas (también en los errores), y oculta su versión. La CSP solo permite JavaScript y CSS propios o de `cdn.jsdelivr.net`, y **no permite scripts ni estilos en línea**: por eso el botón Eliminar usa `data-confirm` y `js/confirm-submit.js` en lugar de un `onsubmit`. Si añades otra CDN, un script o un `<style>` en línea, hay que actualizar la política en `docker/nginx/default.conf` (y recargar con `docker compose exec nginx nginx -s reload`). Si algo no carga, la consola del navegador dice `Refused to ...` con la directiva que lo bloquea.
+Nginx añade `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` y una `Content-Security-Policy` en **todas** las respuestas (también en los errores), y oculta su versión. La CSP solo permite recursos **propios** (`'self'`): la interfaz no carga nada de fuera (ni CDN, ni fuentes, ni scripts de terceros) y **no se permiten scripts ni estilos en línea**: por eso el diálogo de eliminar usa `data-confirm` y `js/app.js` en lugar de un `onsubmit`, y los iconos son un SVG propio (`img/icons.svg`). Si añades una CDN, un script o un `<style>` en línea, hay que actualizar la política en `docker/nginx/default.conf` (y reiniciar nginx: `docker compose restart nginx`; un `reload` no siempre relee un archivo montado que se reescribió). Si algo no carga, la consola del navegador dice `Refused to ...` con la directiva que lo bloquea.
 
 ## Manejo de errores
 

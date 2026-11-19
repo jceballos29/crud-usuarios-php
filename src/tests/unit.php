@@ -521,4 +521,56 @@ same('el nombre del campo', 'csrf_token', CSRF_FIELD);
 same('el token son 32 bytes al azar: 64 caracteres hexadecimales', [32, 64], [CSRF_TOKEN_BYTES, CSRF_TOKEN_BYTES * 2]);
 same('hash_equals no es === : compara en tiempo constante y exige texto en ambos lados', [true, false], [hash_equals('abc', 'abc'), hash_equals('abc', 'abd')]);
 
+section('Interfaz: User::initials(), User::tone(), asset() e icon()');
+$person = static fn(string $name, string $last, string $email = 'a@b.co'): User => User::fromRow(['id' => 1, 'name' => $name, 'last_name' => $last, 'email' => $email, 'role' => 'user', 'active' => 1, 'created_at' => '']);
+same('«Laura Gómez» -> LG', 'LG', $person('Laura', 'Gómez')->initials());
+same('pasa a mayúsculas', 'AM', $person('ana', 'martínez')->initials());
+same('cuenta letras, no bytes: «Ángela Ñúñez» -> ÁÑ', 'ÁÑ', $person('Ángela', 'Ñúñez')->initials());
+same('una letra china es una letra (李雷 -> 李雷)', '李雷', $person('李', '雷')->initials());
+same('ignora los espacios del principio', 'PC', $person('  Pere', ' Cal·lís')->initials());
+same('el tono está entre 1 y 6', true, (function () use ($person): bool {
+    foreach (['a@b.co', 'laura@example.com', 'x', '李雷@例.jp', str_repeat('z', 200)] as $email) {
+        $tone = $person('A', 'B', $email)->tone();
+
+        if ($tone < 1 || $tone > 6) {
+            return false;
+        }
+    }
+
+    return true;
+})());
+same('el tono de una persona es siempre el mismo', $person('A', 'B', 'laura@example.com')->tone(), $person('Z', 'Y', 'laura@example.com')->tone());
+same('...y no distingue mayúsculas del correo (como la BD)', $person('A', 'B', 'Laura@Example.com')->tone(), $person('A', 'B', 'laura@example.com')->tone());
+same('los 6 tonos se usan (no todo el mundo del mismo color)', 6, count(array_unique(array_map(static fn(int $i): int => $person('A', 'B', "persona$i@example.com")->tone(), range(1, 60)))));
+same('asset() añade la fecha del archivo', 1, preg_match('#^/css/app\.css\?v=\d+$#', asset('css/app.css')));
+same('asset() de un archivo que no existe no lleva versión (ni falla)', '/css/no-existe.css', asset('css/no-existe.css'));
+same('asset() rechaza rutas raras (no sale de public/)', '/../../.env', asset('../../.env'));
+same('icon() devuelve un <svg> decorativo con la hoja de iconos propia', 1, preg_match('#^<svg class="icon" aria-hidden="true" focusable="false"><use href="/img/icons\.svg\?v=\d+\#i-pencil"></use></svg>$#', icon('pencil')));
+same('icon() solo acepta nombres de la lista cerrada', true, (function (): bool {
+    foreach (['pencil"><script>', '../x', '', 'PENCIL'] as $bad) {
+        try {
+            icon($bad);
+
+            return false;
+        } catch (InvalidArgumentException) {
+        }
+    }
+
+    return true;
+})());
+same('todos los iconos de la lista existen en la hoja de iconos', [], (function (): array {
+    $sprite = (string) file_get_contents(dirname(__DIR__) . '/public/img/icons.svg');
+    $missing = [];
+
+    foreach (['search', 'plus', 'pencil', 'trash', 'undo', 'logout', 'x', 'chevron-left', 'chevron-right', 'chevron-down', 'check-circle', 'info', 'alert', 'archive', 'users', 'arrow-left'] as $name) {
+        icon($name);
+
+        if (!str_contains($sprite, 'id="i-' . $name . '"')) {
+            $missing[] = $name;
+        }
+    }
+
+    return str_contains($sprite, 'id="brand"') ? $missing : ['brand'];
+})());
+
 finish();

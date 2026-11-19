@@ -8,6 +8,10 @@ declare(strict_types=1);
  * @var array<string, mixed> $form Variables del formulario compartido.
  */
 ?>
-<h1 class="mb-4">Registrar usuario</h1>
+<div class="narrow">
+    <div class="form-head">
+        <h1>Registrar usuario</h1>
+    </div>
 
-<?php App\View\View::render('users/form', $form); ?>
+    <?php App\View\View::render('users/form', $form); ?>
+</div>
