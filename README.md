@@ -21,7 +21,8 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | MVP 6. Eliminar (Delete) | Hecho |
 | MVP 7. Revisión | Hecho (etiqueta `v1-crud-base`) |
 | Mejora 1. Búsqueda y filtros | Hecha (rama `mejora-1-busqueda`) |
-| Mejoras 2 a 8 | Pendientes |
+| Mejora 2. Paginación | Hecha (rama `mejora-2-paginacion`) |
+| Mejoras 3 a 8 | Pendientes |
 
 ## Qué se construye
 
@@ -116,9 +117,10 @@ docker compose ps        # los 4 servicios en running; db en healthy
 
 ## Pruebas
 
-Hay dos niveles y no necesitan instalar nada más que lo que ya usa el proyecto:
+Hay tres niveles y no necesitan instalar nada más que lo que ya usa el proyecto:
 
-- **Unitarias** (`src/tests/unit.php`): las funciones puras (validación, id, origen, fechas, escape). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
+- **Unitarias** (`src/tests/unit.php`): las funciones puras (validación, id, origen, fechas, escape, búsqueda, paginación). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
+- **De integración** (`src/tests/integration.php`): las consultas de búsqueda y paginación contra MySQL, sobre una tabla temporal que no toca tus datos. `docker compose exec php php tests/integration.php`.
 - **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, origen en los tres POST, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
 
 Ambos terminan con código 0 si todo pasa y con 1 si algo falla, así que sirven también para automatizarlos. Si cambias el puerto o el origen, usa `BASE_URL` y `ORIGIN`.
@@ -150,14 +152,16 @@ crud-usuarios-docker/
     │   ├── helpers.php                  # environment(), escape(), log_exception()
     │   ├── user-validation.php          # Campos, limpieza y validación (compartido)
     │   ├── origin.php                   # Funciones puras: comprueban Origin/Referer contra APP_ORIGIN
-    │   ├── user-search.php              # Funciones puras de la búsqueda (término, patrón LIKE, consulta)
+    │   ├── user-search.php              # Funciones puras de la búsqueda (término, patrón LIKE, consultas de listado y recuento)
+    │   ├── pagination.php               # Funciones puras de la paginación (página, rango, enlaces, URL del listado)
     │   ├── request-guard.php            # reject_foreign_origin(): el 403 de create, edit y delete
     │   ├── DatabaseConnectionException.php
     │   ├── layout/                      # header.php, footer.php
-    │   └── partials/                    # users-list.php, user-form.php, user-not-found.php, action-error.php
-    ├── tests/               # Pruebas unitarias (unit.php); fuera de public/
+    │   └── partials/                    # users-list.php, pagination.php, user-form.php, user-not-found.php, action-error.php
+    ├── tests/               # unit.php, integration.php y harness.php (común); fuera de public/
     └── scripts/             # Solo consola
         ├── db-check.php
+        ├── seed-demo.php   # Inserta/borra usuarios de demostración (demo-NNN@example.com)
         └── info.php
 ```
 
@@ -191,7 +195,17 @@ El listado tiene un buscador: `index.php?q=texto`. Es una petición **GET**, as�
 - **Los espacios repetidos se juntan** (`laura   gomez` equivale a `laura gomez`), el texto se recorta a 254 caracteres y lo que no sea texto (`?q[]=x`) cuenta como "sin búsqueda".
 - **`%`, `_` y `\` se buscan tal cual:** en `LIKE` son comodines, y `includes/user-search.php` los escapa para que `100%` encuentre `100%` y no todo. Esto exige que `sql_mode` de MySQL no incluya `NO_BACKSLASH_ESCAPES` (por defecto no lo incluye; `tests/smoke.sh` lo comprueba).
 - **Sin resultados** responde **200** con el mensaje "No se encontraron resultados para «…»": la búsqueda se completó, simplemente no hay filas.
-- **Límite conocido:** tras crear, editar o eliminar desde una búsqueda se vuelve al listado completo (el filtro no se conserva). Una consulta `LIKE '%texto%'` no puede usar un índice y recorre la tabla: sin problema con cientos de usuarios, y la paginación (mejora 2) es la respuesta cuando crezca.
+- **Límite conocido:** una consulta `LIKE '%texto%'` no puede usar un índice y recorre la tabla (con 200.000 usuarios, ~230 ms): sin problema con cientos o miles de usuarios.
+
+## Paginación
+
+El listado muestra 10 usuarios por página: `index.php?page=2` (y `index.php?q=laura&page=2` con búsqueda). La página 1 y la búsqueda vacía no se escriben en la URL, así que cada estado tiene una sola.
+
+- **`page` inválido** (vacío, `0`, negativo, decimal, letras, `?page[]=2`) cuenta como la página 1. **Pasado de rango** (`?page=999`) muestra la última, con 200.
+- **El estado se conserva:** los enlaces de página, «Editar», «Cancelar» y el regreso tras guardar o eliminar llevan la búsqueda y la página. Si se elimina al último usuario de la última página se muestra la nueva última, no una vacía. Crear vuelve a la página 1.
+- **Rendimiento (medido con 200.000 usuarios):** una página lejana (`OFFSET 190000`) cuesta ~60 ms, y un `COUNT(*)` ~23 ms sin búsqueda o ~230 ms con ella. La paginación por clave (`WHERE id < :último`) sería ~0,3 ms siempre, pero no permite saltar a una página ni numerarlas.
+- **`LIMIT` y `OFFSET`** se enlazan con `PDO::PARAM_INT` (`bind_all()`): con consultas nativas MySQL perdona un texto, con emuladas no.
+- **Datos de demostración:** `docker compose exec php php scripts/seed-demo.php 35` crea 35 usuarios `demo-NNN@example.com`; `--clean` los borra.
 
 ## Ediciones simultáneas
 

@@ -5,6 +5,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/request-guard.php';
+require_once __DIR__ . '/../includes/user-search.php';
+require_once __DIR__ . '/../includes/pagination.php';
 
 $pageTitle = "Editar usuario";
 
@@ -17,6 +19,15 @@ $submitted = $_SERVER['REQUEST_METHOD'] === 'POST';
 if ($submitted) {
     reject_foreign_origin(); // 403 si el POST no viene del propio sitio, antes de mirar el id o lo que envía
 }
+
+// Estado del listado al que se vuelve tras guardar o cancelar (búsqueda y página). Llega en la URL al
+// abrir el formulario y en campos ocultos al enviarlo, y se valida igual que en index.php. Son solo dos
+// valores (un texto limpio y un entero): nunca una URL, así que no hay redirección a sitios externos.
+$stateSource = $submitted ? $_POST : $_GET;
+$returnSearch = parse_search_term($stateSource['q'] ?? null);
+$returnPage = parse_page($stateSource['page'] ?? null);
+$returnState = list_state($returnSearch, $returnPage);
+$cancelUrl = list_url($returnSearch, $returnPage);
 
 // El id se lee una sola vez y solo de la fuente que corresponde al método:
 // GET al abrir el formulario, POST al enviarlo. Nunca se mezclan.
@@ -80,7 +91,7 @@ if (!$notFound) {
                     // WHERE aunque los valores no cambien, así que 0 significa que el usuario ya no existe
                     // (alguien lo borró entre el SELECT y el UPDATE).
                     if ($stmt->rowCount() > 0) {
-                        header('Location: index.php?msg=updated');
+                        header('Location: ' . list_url($returnSearch, $returnPage, ['msg' => 'updated']));
                         exit;
                     }
 

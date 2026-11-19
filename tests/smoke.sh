@@ -172,6 +172,84 @@ LONG=$(printf 'a%.0s' $(seq 1 600)); search "$LONG"
 [ "$(tr -d '\n' < "$TMP/body" | grep -oE 'value="a+"' | head -1 | sed -E 's/value="(a+)"/\1/' | tr -d '\n' | wc -c)" = 254 ]; ok "un texto de 600 caracteres se recorta a 254" $?
 [ "$(sql 'SELECT @@sql_mode;' | grep -c NO_BACKSLASH_ESCAPES)" = 0 ]; ok "sql_mode no tiene NO_BACKSLASH_ESCAPES (si lo tuviera, el escape con \\ dejaría de funcionar)" $?
 
+section "Paginación (M2): GET ?page=N, 10 usuarios por página"
+# 25 usuarios de prueba (3 páginas aunque la BD tenga pocos); se aíslan con la búsqueda "smoke-pag".
+sql "SET SESSION cte_max_recursion_depth = 1000; INSERT INTO users (name, last_name, email) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 25) SELECT 'Paginado', 'Smoke', CONCAT('smoke-pag-', LPAD(i, 2, '0'), '@example.com') FROM n;" >/dev/null
+rows() { grep -c 'edit.php?id=' "$TMP/body"; }
+ids() { grep -oE 'edit.php\?id=[0-9]+' "$TMP/body" | grep -oE '[0-9]+'; }
+flat() { tr -d '\n' < "$TMP/body" | sed -E 's/\s+/ /g'; }
+page_of() { chk "q=smoke-pag page=$1" 200 --get --data-urlencode "q=smoke-pag" --data-urlencode "page=$1" "$BASE/"; }
+page_of 1; [ "$(rows)" = 10 ]; ok "página 1: 10 filas" $?
+flat | grep -qF "25 resultados para «smoke-pag»"; ok "...el resumen cuenta los 25 (no los 10 de la página)" $?
+flat | grep -qF "Mostrando 1 a 10."; ok "...y dice qué filas muestra (1 a 10)" $?
+grep -qF '<span class="page-link">Anterior</span>' "$TMP/body"; ok "...\"Anterior\" está deshabilitado (un <span>, no un enlace)" $?
+grep -qF 'href="index.php?q=smoke-pag&amp;page=2" rel="next">Siguiente</a>' "$TMP/body"; ok "...\"Siguiente\" lleva a la 2 y conserva la búsqueda" $?
+grep -qF 'aria-current="page">1</span>' "$TMP/body"; ok "...la página actual (1) está marcada con aria-current" $?
+[ "$(grep -c 'aria-current="page"' "$TMP/body")" = 1 ]; ok "...y solo una página está marcada" $?
+tr -d '\n' < "$TMP/body" | grep -qF '<nav aria-label="Paginación del listado de usuarios">'; ok "...la navegación es un <nav> con nombre accesible" $?
+IDS1=$(ids)
+page_of 2; [ "$(rows)" = 10 ]; ok "página 2: 10 filas" $?
+flat | grep -qF "Mostrando 11 a 20."; ok "...resumen 11 a 20" $?
+grep -qF 'href="index.php?q=smoke-pag" rel="prev">Anterior</a>' "$TMP/body"; ok "...\"Anterior\" lleva a la 1 SIN ?page=1 (cada estado tiene una sola URL)" $?
+grep -qF 'href="index.php?q=smoke-pag&amp;page=3" rel="next">Siguiente</a>' "$TMP/body"; ok "...\"Siguiente\" lleva a la 3" $?
+IDS2=$(ids)
+page_of 3; [ "$(rows)" = 5 ]; ok "página 3 (la última): 5 filas" $?
+flat | grep -qF "Mostrando 21 a 25."; ok "...resumen 21 a 25" $?
+grep -qF '<span class="page-link">Siguiente</span>' "$TMP/body"; ok "...\"Siguiente\" está deshabilitado en la última" $?
+IDS3=$(ids)
+ALL=$(printf '%s\n%s\n%s\n' "$IDS1" "$IDS2" "$IDS3")
+[ "$(printf '%s\n' "$ALL" | grep -c .)" = 25 ] && [ "$(printf '%s\n' "$ALL" | sort -u | grep -c .)" = 25 ]; ok "las 3 páginas suman 25 usuarios distintos: ni huecos ni repeticiones" $?
+[ "$ALL" = "$(printf '%s\n' "$ALL" | sort -rn)" ]; ok "...y los ids van de mayor a menor a través de las páginas" $?
+for bad in 4 999 99999999999999999999999; do page_of "$bad"; [ "$(rows)" = 5 ] && flat | grep -qF "Mostrando 21 a 25." && grep -qF 'aria-current="page">3</span>' "$TMP/body"; ok "?page=$bad se corrige a la última (la 3) con 200" $?; done
+for bad in 0 abc -3 1.5 " 2" "+2" ""; do page_of "$bad"; [ "$(rows)" = 10 ] && flat | grep -qF "Mostrando 1 a 10."; ok "?page='$bad' cuenta como la página 1" $?; done
+chk "?page[]=2 (un arreglo)" 200 "$BASE/?q=smoke-pag&page%5B%5D=2"; flat | grep -qF "Mostrando 1 a 10."; ok "...cuenta como la página 1" $?
+page_of 2
+LINKS=$(tr -d '\n' < "$TMP/body" | grep -oE '<nav aria-label="Paginación.*</nav>' | grep -oE 'href="[^"]*"')
+[ "$(printf '%s\n' "$LINKS" | grep -c .)" -ge 4 ] && ! printf '%s\n' "$LINKS" | grep -qv 'q=smoke-pag'; ok "TODOS los enlaces de la paginación conservan la búsqueda" $?
+chk "q con tildes y espacios, página 2" 200 --get --data-urlencode "q=smoke pag" --data-urlencode "page=2" "$BASE/"; ok "(el espacio de «smoke pag» no encuentra nada, pero no rompe)" 0
+chk "una sola página no pinta la navegación" 200 --get --data-urlencode "q=smoke-busq" "$BASE/"; ! grep -qF 'aria-label="Paginación' "$TMP/body"; ok "...la búsqueda de 5 resultados no tiene <nav>" $?
+chk "sin búsqueda: GET /" 200 "$BASE/"; TOTAL=$(sql 'SELECT COUNT(*) FROM users;'); PAGES=$(( (TOTAL + 9) / 10 ))
+flat | grep -qF "Lista de Usuarios ($TOTAL)"; ok "el título cuenta TODOS los usuarios ($TOTAL), no los de la página" $?
+[ "$(rows)" = "$(( TOTAL < 10 ? TOTAL : 10 ))" ]; ok "...y la página 1 tiene $(( TOTAL < 10 ? TOTAL : 10 )) filas" $?
+chk "sin búsqueda: la última página ($PAGES)" 200 "$BASE/?page=$PAGES"; [ "$(rows)" = "$(( TOTAL - 10 * (PAGES - 1) ))" ]; ok "...tiene $(( TOTAL - 10 * (PAGES - 1) )) filas" $?
+chk "sin búsqueda: ?page=$(( PAGES + 7 ))" 200 "$BASE/?page=$(( PAGES + 7 ))"; [ "$(rows)" = "$(( TOTAL - 10 * (PAGES - 1) ))" ]; ok "...se corrige a la última" $?
+
+section "El listado conserva la búsqueda y la página al editar y eliminar"
+page_of 2
+grep -qE 'href="edit.php\?id=[0-9]+&amp;q=smoke-pag&amp;page=2"' "$TMP/body"; ok "el enlace de editar lleva q y page" $?
+tr -d '\n' < "$TMP/body" | grep -qE '<form method="post" action="delete.php"[^>]*>\s*<input type="hidden" name="id" value="[0-9]+">\s*<input type="hidden" name="q" value="smoke-pag">\s*<input type="hidden" name="page" value="2">'; ok "el formulario de eliminar lleva q y page en campos ocultos" $?
+page_of 1
+! grep -qE 'edit.php\?id=[0-9]+&amp;page=' "$TMP/body" && grep -qE 'href="edit.php\?id=[0-9]+&amp;q=smoke-pag"' "$TMP/body"; ok "en la página 1 no se escribe page=1 en el enlace de editar" $?
+EDIT_ID=$(printf '%s\n' "$IDS2" | head -1)
+chk "abrir el formulario de edición desde la página 2" 200 "$BASE/edit.php?id=$EDIT_ID&q=smoke-pag&page=2"
+grep -qF 'href="index.php?q=smoke-pag&amp;page=2">Cancelar</a>' "$TMP/body"; ok "\"Cancelar\" vuelve a la búsqueda y a la página 2" $?
+tr -d '\n' < "$TMP/body" | grep -qE 'name="q" value="smoke-pag">\s*<input type="hidden" name="page" value="2"'; ok "el formulario lleva q y page en campos ocultos" $?
+chk "guardar desde la página 2" 302 -H "Origin: $ORIGIN" -d "id=$EDIT_ID&q=smoke-pag&page=2&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
+[ "$(header_of location)" = "Location: index.php?msg=updated&q=smoke-pag&page=2" ]; ok "...y vuelve a la misma búsqueda y página (con el aviso)" $?
+chk "guardar sin estado (como antes de M2)" 302 -H "Origin: $ORIGIN" -d "id=$EDIT_ID&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
+[ "$(header_of location)" = "Location: index.php?msg=updated" ]; ok "...sin estado sigue yendo a index.php?msg=updated" $?
+chk "estado hostil al guardar (page=abc, q como arreglo)" 302 -H "Origin: $ORIGIN" --data-urlencode "q[]=x" -d "id=$EDIT_ID&page=abc&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
+[ "$(header_of location)" = "Location: index.php?msg=updated" ]; ok "...un estado inválido se ignora" $?
+chk "q con un salto de línea para colar otra cabecera" 302 -H "Origin: $ORIGIN" --data-urlencode $'q=a\r\nSet-Cookie: hack=1' -d "id=$EDIT_ID&page=2&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
+! grep -qi '^Set-Cookie' "$TMP/head"; ok "...no se cuela ninguna cabecera Set-Cookie" $?
+[ "$(header_of location)" = "Location: index.php?msg=updated&q=a%20Set-Cookie%3A%20hack%3D1&page=2" ]; ok "...el salto de línea queda como un espacio y todo el texto codificado en el Location" $?
+
+section "Eliminar al último usuario de la última página (el caso límite de M2)"
+page_of 3; LAST_IDS=$(ids); [ "$(printf '%s\n' "$LAST_IDS" | grep -c .)" = 5 ]; ok "la página 3 tiene 5 usuarios (de 25)" $?
+for id in $LAST_IDS; do
+    chk "eliminar el usuario $id desde la página 3" 302 -H "Origin: $ORIGIN" -d "id=$id&q=smoke-pag&page=3" "$BASE/delete.php"
+done
+[ "$(header_of location)" = "Location: index.php?msg=deleted&q=smoke-pag&page=3" ]; ok "al borrar al ÚLTIMO de la página 3, el Location sigue apuntando a la página 3 (que ya no existe)..." $?
+chk "...y al seguir esa redirección" 200 "$BASE/index.php?msg=deleted&q=smoke-pag&page=3"
+flat | grep -qF "Mostrando 11 a 20." && [ "$(rows)" = 10 ] && grep -qF 'aria-current="page">2</span>' "$TMP/body"; ok "...se muestra la nueva última página (la 2) con 10 usuarios, no una vacía" $?
+grep -q 'alert theme-success' "$TMP/body"; ok "...y el aviso de eliminado se ve" $?
+! grep -qF '<span class="page-link">Siguiente</span>' "$TMP/body" || true; grep -qF '<span class="page-link">Siguiente</span>' "$TMP/body"; ok "...con \"Siguiente\" deshabilitado, porque ya es la última" $?
+page_of 3; [ "$(rows)" = 10 ]; ok "pedir la 3 directamente también muestra la 2 (ya solo hay 20)" $?
+chk "eliminar sin estado (como antes de M2)" 302 -H "Origin: $ORIGIN" -d "id=$(printf '%s\n' "$IDS1" | head -1)" "$BASE/delete.php"
+[ "$(header_of location)" = "Location: index.php?msg=deleted" ]; ok "...sin estado sigue yendo a index.php?msg=deleted" $?
+chk "eliminar con un estado hostil" 302 -H "Origin: $ORIGIN" --data-urlencode "q[]=x" -d "id=$(printf '%s\n' "$IDS1" | sed -n 2p)&page=%00abc" "$BASE/delete.php"
+[ "$(header_of location)" = "Location: index.php?msg=deleted" ]; ok "...y un estado inválido se ignora" $?
+
 section "Editar (edit.php)"
 for q in "" "?id=abc" "?id%5B%5D=1" "?id=0" "?id=-3" "?id=9999" "?id=4294967296" "?id=%2B$U1" "?id=%20$U1" "?id=0$U1"; do
     chk "GET edit.php$q" 404 "$BASE/edit.php$q"
@@ -245,6 +323,8 @@ if [ "$WITH_DB_STOP" = 1 ]; then
     docker compose stop db >/dev/null 2>&1
     chk "GET /" 503 "$BASE/"
     chk "GET /?q=zoe (una búsqueda)" 503 --get --data-urlencode "q=zoe" "$BASE/"
+    chk "GET /?page=2 (una página)" 503 "$BASE/?page=2"
+    chk "GET /?q=zoe&page=3 (búsqueda y página)" 503 --get --data-urlencode "q=zoe" --data-urlencode "page=3" "$BASE/"
     chk "GET create.php" 200 "$BASE/create.php"
     chk "POST create.php" 503 -H "Origin: $ORIGIN" -d "name=Ana&last_name=Ruiz&email=smoke-y@example.com" "$BASE/create.php"
     chk "GET edit.php" 503 "$BASE/edit.php?id=$U2"

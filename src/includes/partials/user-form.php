@@ -14,6 +14,8 @@ declare(strict_types=1);
  * @var string $submitLabel Texto del botón de envío (Registrar, Actualizar).
  * @var int|null $userId Id del usuario que se edita; null al crear (no se pinta el campo oculto).
  * @var string|null $rowToken Huella de la fila con la que se abrió el formulario (user_row_token()); null al crear.
+ * @var array<string, string|int> $returnState Estado del listado al que se vuelve (list_state()); [] al crear.
+ * @var string $cancelUrl A dónde lleva "Cancelar" (el listado, en el mismo estado en que se salió).
  */
 ?>
 <?php if ($errorMessage !== null): ?>
@@ -30,6 +32,9 @@ declare(strict_types=1);
     <?php if ($userId !== null): ?>
         <input type="hidden" name="id" value="<?= escape($userId) ?>">
     <?php endif; ?>
+    <?php foreach ($returnState as $stateName => $stateValue): ?>
+        <input type="hidden" name="<?= escape($stateName) ?>" value="<?= escape($stateValue) ?>">
+    <?php endforeach; ?>
     <?php if ($rowToken !== null): ?>
         <input type="hidden" name="row_token" value="<?= escape($rowToken) ?>">
     <?php endif; ?>
@@ -57,6 +62,6 @@ declare(strict_types=1);
 
     <div class="d-grid gap-4 mt-10">
         <button type="submit" class="btn-solid theme-primary"><?= escape($submitLabel) ?></button>
-        <a role="button" class="btn-solid" href="index.php">Cancelar</a>
+        <a role="button" class="btn-solid" href="<?= escape($cancelUrl) ?>">Cancelar</a>
     </div>
 </form>

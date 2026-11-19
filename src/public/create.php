@@ -55,6 +55,8 @@ $action = 'create.php';
 $submitLabel = 'Registrar';
 $userId = null;
 $rowToken = null;
+$returnState = []; // un alta no viene de ninguna página: el usuario nuevo sale el primero
+$cancelUrl = 'index.php';
 
 require __DIR__ . '/../includes/layout/header.php';
 ?>

@@ -109,3 +109,18 @@ function describe_failure(Throwable $error, string $queryMessage): array
 
     return [500, 'Ocurrió un error inesperado. Inténtalo más tarde.'];
 }
+
+/**
+ * Enlaza los parámetros de una consulta preparada respetando su tipo: los enteros de PHP con
+ * PDO::PARAM_INT y todo lo demás como texto. Hace falta para LIMIT y OFFSET: ni `execute($params)` ni
+ * `bindValue()` sin tipo valen con consultas emuladas, que escribirían `LIMIT '10'` en el SQL.
+ *
+ * @param PDOStatement $stmt La consulta ya preparada.
+ * @param array<string, string|int> $params Marcador => valor (p. ej. [':limit' => 10]).
+ */
+function bind_all(PDOStatement $stmt, array $params): void
+{
+    foreach ($params as $name => $value) {
+        $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+    }
+}

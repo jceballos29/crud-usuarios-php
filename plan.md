@@ -36,7 +36,7 @@ El texto que ve el usuario final sigue en español.
 | 6 | Eliminar usuario (Delete) | [x] |
 | 7 | Revisión final del CRUD | [x] |
 | M1 | Búsqueda y filtros | [x] |
-| M2 | Paginación | [ ] |
+| M2 | Paginación | [x] |
 | M3 | Más campos | [ ] |
 | M4 | Borrado lógico | [ ] |
 | M5 | Inicio de sesión | [ ] |
@@ -968,18 +968,35 @@ Orden recomendado (de menor a mayor dificultad). Cada mejora se hace en una rama
 **Objetivo:** mostrar 10 usuarios por página.
 **Concepto:** `LIMIT n OFFSET m`; total de páginas = `ceil(total / porPagina)`.
 
-- [ ] Parámetro `?pagina=2`: valida entero ≥ 1 (si no, usa 1).
-- [ ] Cuenta el total con `SELECT COUNT(*)` (respetando el filtro de M1 si ya existe).
-- [ ] Calcula total de páginas y corrige la página si se pasó del rango.
-- [ ] Calcula `OFFSET = (pagina - 1) * porPagina`.
-- [ ] **Trampa a entender:** con consultas preparadas nativas, `LIMIT :l` con un string falla. Investiga `bindValue(..., PDO::PARAM_INT)` y úsalo.
-- [ ] Enlaces "Anterior / Siguiente" y números de página; la página actual resaltada; deshabilitar anterior/siguiente en los extremos.
-- [ ] Los enlaces **conservan** la búsqueda (`q`). Pista: `http_build_query`.
-- [ ] Para probar, inserta ~35 usuarios (investiga cómo hacerlo con un script SQL de seed adicional o un bucle PHP CLI en `src/`).
-- [ ] Pruebas: página 1, última, `?pagina=0`, `?pagina=abc`, `?pagina=999`, y con búsqueda.
-- [ ] Tras eliminar el último usuario de una página, ¿a dónde vuelves? Piensa en el caso límite.
+- [x] Parámetro `?pagina=2`: valida entero ≥ 1 (si no, usa 1).
+    - **Hecho con una desviación:** el parámetro se llama **`page`** (`?page=2`), no `pagina`, para ir a juego con `q` y con el resto del código en inglés. `parse_page()` (`includes/pagination.php`, función pura) acepta solo dígitos (`ctype_digit`); vacío, `0`, negativos, decimales, letras, `+2`, ` 2` y `?page[]=2` dan la página 1; `02` es la 2; un número de más de 15 dígitos no es un error, se trata como "más allá de la última" y se corrige.
+- [x] Cuenta el total con `SELECT COUNT(*)` (respetando el filtro de M1 si ya existe).
+    - **Hecho:** `user_count_query()` y `user_list_query()` salen del mismo `user_search_where()`, así que cuentan y listan siempre las mismas filas (una prueba compara el `WHERE` de ambas).
+- [x] Calcula total de páginas y corrige la página si se pasó del rango.
+    - **Hecho en `paginate()`:** con 35 usuarios, `?page=999` muestra la 4 (con 200, sin redirigir); con 0 usuarios hay **una** página vacía, nunca cero. Una prueba de propiedad comprueba, para totales de 0 a 120, que las páginas cubren todas las filas sin huecos ni repeticiones.
+- [x] Calcula `OFFSET = (pagina - 1) * porPagina`.
+    - **Hecho** (una mutación con `page * perPage` es detectada por las pruebas).
+- [x] **Trampa a entender:** con consultas preparadas nativas, `LIMIT :l` con un string falla. Investiga `bindValue(..., PDO::PARAM_INT)` y úsalo.
+    - **Medido: la trampa del plan está invertida para esta configuración.** Con `EMULATE_PREPARES=false` (la del proyecto) **funcionan todas** las variantes, incluso pasar los números como texto con `execute()`, porque MySQL convierte `'10'` a número. Quien **falla** es el modo **emulado** (`EMULATE_PREPARES=true`): PDO escribe `LIMIT '10'` y MySQL responde con el error 1064; ahí solo vale `bindValue(..., PDO::PARAM_INT)`. Decisión: enlazar siempre con `PARAM_INT` (`bind_all()` en `helpers.php`: los `int` van como entero, el resto como texto), de modo que el código no dependa de ese ajuste. `tests/integration.php` prueba los dos modos; una mutación que quita el `PARAM_INT` solo la delata el modo emulado.
+- [x] Enlaces "Anterior / Siguiente" y números de página; la página actual resaltada; deshabilitar anterior/siguiente en los extremos.
+    - **Hecho** (`partials/pagination.php`): `<nav aria-label>`, página actual con `aria-current="page"`, extremos como `<span>` (no enlaces), `rel="prev"`/`rel="next"`. `page_links()` enseña la primera, la última y dos a cada lado de la actual; un hueco de una sola página se escribe y los mayores se pintan como «…». No se pinta nada si hay una sola página.
+- [x] Los enlaces **conservan** la búsqueda (`q`). Pista: `http_build_query`.
+    - **Hecho** con `list_url()` (`http_build_query` en RFC 3986): la página 1 y la búsqueda vacía se omiten, así que cada estado tiene una sola URL. Los espacios, tildes, `&` y saltos de línea quedan codificados (no se puede colar una cabecera en un `Location:`).
+- [x] Para probar, inserta ~35 usuarios (investiga cómo hacerlo con un script SQL de seed adicional o un bucle PHP CLI en `src/`).
+    - **Hecho:** `src/scripts/seed-demo.php` (solo consola; `[N]` o `--clean`; correos `demo-NNN@example.com`; idempotente). Las pruebas automáticas usan sus propios datos (`smoke-pag-NN` y una tabla temporal).
+- [x] Pruebas: página 1, última, `?pagina=0`, `?pagina=abc`, `?pagina=999`, y con búsqueda.
+    - **Hecho:** unitarias 247 (antes 170), integración 71 (nueva, contra MySQL con una tabla temporal que no toca tus datos ni su AUTO_INCREMENT) y de punta a punta 288 con `--with-db-stop` (antes 196). Incluyen 0, `abc`, `-3`, `1.5`, vacío, `[]`, 999 y un número gigante, comodines y búsquedas con paginación, 503 con la BD parada y mutaciones que las pruebas detectan.
+- [x] Tras eliminar el último usuario de una página, ¿a dónde vuelves? Piensa en el caso límite.
+    - **Respuesta:** `delete.php` redirige a la misma `q` y `page` de donde se pulsó. Si era el último de la última página, esa página ya no existe, pero `paginate()` la corrige y se ve la **nueva última** (con el aviso de eliminado), no una vacía. Lo mismo al editar y al cancelar: el formulario lleva `q` y `page` en campos ocultos, validados igual que en `index.php` (son un texto limpio y un entero, nunca una URL). Esto resuelve el límite de M1 "el filtro no se conserva". Crear vuelve a la página 1, donde el usuario nuevo sale el primero.
 
 **Preguntas:** ¿qué problema de rendimiento resuelve? ¿qué costo tiene `OFFSET` grande? ¿por qué hay que contar aparte?
+
+**Respuestas a las preguntas.**
+- **¿Qué problema resuelve?** Enviar y pintar miles de filas. Medido en §9.1: con 20.000 usuarios, 278 ms y 20,5 MB de HTML; lo lento era el HTML, no PHP ni MySQL. Con 10 por página el HTML tiene siempre el mismo tamaño.
+- **¿Qué cuesta un `OFFSET` grande?** MySQL tiene que recorrer y descartar las filas saltadas. Medido con 200.000 usuarios (mediana de 7), página de 10: `OFFSET 0` 0,14 ms; 10.000 3,3 ms; 100.000 31 ms; 190.000 **60 ms** (`EXPLAIN`: recorre ~190.000 entradas del índice). Crece linealmente, pero con 200.000 filas sigue siendo una fracción de lo que costaba el HTML. La alternativa es la **paginación por clave** (`WHERE id < :último ORDER BY id DESC LIMIT 10`): 0,2-0,3 ms a cualquier profundidad, a cambio de no poder saltar a «la página 5000» ni mostrar números de página. Para esta aplicación no hace falta.
+- **¿Por qué hay que contar aparte?** Porque la página solo trae 10 filas y de ellas no se puede deducir cuántas hay en total ni cuántas páginas. Cuesta: `COUNT(*)` sin búsqueda con 200.000 filas, 23 ms; con una búsqueda `LIKE '%…%'` 227 ms (recorre toda la tabla: un `%` inicial no puede usar índice). Es el coste real de «buscar y paginar» a gran escala.
+
+**Decisiones y límites de M2 (2026-11-19).** (1) `page` en vez de `pagina`. (2) Página fuera de rango: 200 con la última, sin redirigir. (3) Orden por `id DESC` (único): si algún día se ordena por otra columna hay que desempatar por `id`. (4) Entre dos peticiones alguien puede crear o borrar usuarios, así que una fila puede aparecer en dos páginas o saltarse: es inherente a `OFFSET`. (5) `tests/integration.php` necesita el permiso `CREATE TEMPORARY TABLES`; con el usuario de mínimo privilegio de M7 habría que dárselo o dejar de usarlo. (6) **Sin comprobar en un navegador**: el aspecto de la paginación (las clases `.pagination`/`.page-link` dependen del CSS del proyecto) y la lectura con lector de pantalla.
 
 ## M3. Más campos (documento, fecha de nacimiento, rol)
 

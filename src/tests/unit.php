@@ -17,30 +17,9 @@ require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/origin.php';
 require_once __DIR__ . '/../includes/user-search.php';
+require_once __DIR__ . '/../includes/pagination.php';
 
-$passed = 0;
-$failed = 0;
-
-function section(string $title): void
-{
-    echo PHP_EOL . "== $title" . PHP_EOL;
-}
-
-function same(string $description, mixed $expected, mixed $actual): void
-{
-    global $passed, $failed;
-
-    if ($expected === $actual) {
-        $passed++;
-        echo "  ok    $description" . PHP_EOL;
-        return;
-    }
-
-    $failed++;
-    echo "  FALLO $description" . PHP_EOL;
-    echo '        esperado: ' . var_export($expected, true) . PHP_EOL;
-    echo '        obtenido: ' . var_export($actual, true) . PHP_EOL;
-}
+require_once __DIR__ . '/harness.php';
 
 function nameError(string $name): ?string
 {
@@ -227,26 +206,140 @@ same('barra y porcentaje juntos (\\%): una sola pasada, sin escapar dos veces', 
 same('vacío', '%%', like_pattern(''));
 same('los %, _ y \\ de cada extremo también se escapan', '%\\%x\\_\\\\%', like_pattern('%x_\\'));
 
-section('user_list_query(): marcadores distintos y nada del visitante dentro del SQL');
-[$allSql, $allParams] = user_list_query('');
-same('sin búsqueda: sin parámetros', [], $allParams);
+section('user_search_where() y user_count_query(): el mismo filtro para listar y para contar');
+same('sin búsqueda: ni condición ni parámetros', ['', []], user_search_where(''));
+same('recuento sin búsqueda', ['SELECT COUNT(*) FROM users', []], user_count_query(''));
+[$countSql, $countParams] = user_count_query('laura');
+preg_match_all('/:q\d+/', $countSql, $countMarkers);
+same('recuento con búsqueda: 5 marcadores distintos', [5, 5], [count($countMarkers[0]), count(array_unique($countMarkers[0]))]);
+same('el recuento empieza por SELECT COUNT(*) y lleva el WHERE', true, str_starts_with($countSql, 'SELECT COUNT(*) FROM users WHERE '));
+same('el recuento no lleva ORDER BY ni LIMIT (no hacen falta para contar)', false, str_contains($countSql, 'ORDER BY') || str_contains($countSql, 'LIMIT'));
+
+section('user_list_query(): una página, marcadores distintos y nada del visitante dentro del SQL');
+[$allSql, $allParams] = user_list_query('', 10, 0);
+same('sin búsqueda: solo los parámetros de la página', [':limit' => 10, ':offset' => 0], $allParams);
 same('sin búsqueda: sin WHERE', false, str_contains($allSql, 'WHERE'));
-same('sin búsqueda: ordena por id descendente', true, str_ends_with($allSql, 'ORDER BY id DESC'));
-[$sql, $params] = user_list_query('laura');
+same('ordena por id descendente y pagina', true, str_ends_with($allSql, 'ORDER BY id DESC LIMIT :limit OFFSET :offset'));
+same('LIMIT y OFFSET son enteros de PHP (bind_all los enlaza con PARAM_INT)', [true, true], [is_int($allParams[':limit']), is_int($allParams[':offset'])]);
+[$sql, $params] = user_list_query('laura', 10, 20);
 preg_match_all('/:q\d+/', $sql, $matches);
-same('con búsqueda: 5 marcadores', 5, count($matches[0]));
+same('con búsqueda: 5 marcadores de columna', 5, count($matches[0]));
 same('con búsqueda: NINGÚN marcador repetido (si no, HY093 con prepares reales)', count($matches[0]), count(array_unique($matches[0])));
-same('los parámetros llevan exactamente esos marcadores', array_unique($matches[0]), array_keys($params), );
-same('todos reciben el mismo patrón', ['%laura%'], array_values(array_unique($params)));
+same('los parámetros son exactamente esos marcadores más :limit y :offset', [...array_unique($matches[0]), ':limit', ':offset'], array_keys($params));
+same('los 5 de la búsqueda reciben el mismo patrón', ['%laura%'], array_values(array_unique(array_slice($params, 0, 5))));
+same('LIMIT y OFFSET llegan tal cual', [10, 20], [$params[':limit'], $params[':offset']]);
 same('busca en el nombre completo ("Laura Gómez")', true, str_contains($sql, "CONCAT(name, ' ', last_name) LIKE"));
 same('busca en el correo y en el teléfono', true, str_contains($sql, 'email LIKE') && str_contains($sql, 'phone LIKE'));
-same('mantiene el orden por id descendente', true, str_ends_with($sql, 'ORDER BY id DESC'));
+[$negSql, $negParams] = user_list_query('', 0, -5);
+same('LIMIT 0 se corrige a 1 (MySQL no admite negativos)', 1, $negParams[':limit']);
+same('OFFSET negativo se corrige a 0', 0, $negParams[':offset']);
+[$negSql2, $negParams2] = user_list_query('', -3, 5);
+same('LIMIT negativo se corrige a 1', 1, $negParams2[':limit']);
+[$listSql] = user_list_query('x', 10, 0);
+[$countSqlX] = user_count_query('x');
+same('el listado y el recuento comparten exactamente el mismo WHERE', substr($countSqlX, strlen('SELECT COUNT(*) FROM users')), substr($listSql, strlen('SELECT id, name, last_name, email, phone, created_at FROM users'), strpos($listSql, ' ORDER BY') - strlen('SELECT id, name, last_name, email, phone, created_at FROM users')));
 $hostile = "'; DROP TABLE users; --";
-[$hostileSql, $hostileParams] = user_list_query($hostile);
+[$hostileSql, $hostileParams] = user_list_query($hostile, 10, 0);
 same('un texto hostil no aparece en el SQL', false, str_contains($hostileSql, 'DROP') || str_contains($hostileSql, '--'));
-same('un texto hostil viaja solo como parámetro', true, str_contains(array_values($hostileParams)[0], 'DROP TABLE users'));
-[$uniqueSql] = user_list_query('zzzunico');
+same('un texto hostil viaja solo como parámetro', true, str_contains($hostileParams[':q0'], 'DROP TABLE users'));
+[$uniqueSql] = user_list_query('zzzunico', 10, 0);
 same('lo que se busca nunca está en el SQL', false, str_contains($uniqueSql, 'zzzunico'));
 
-echo PHP_EOL . "Resultado: $passed correctas, $failed fallidas" . PHP_EOL;
-exit($failed === 0 ? 0 : 1);
+section('parse_page(): lo que no es un entero >= 1 cuenta como la página 1');
+foreach (['1' => 1, '2' => 2, '35' => 35, '02' => 2, '007' => 7, '999999999999999' => 999999999999999] as $raw => $page) {
+    same("'$raw' es la página $page", $page, parse_page((string) $raw));
+}
+foreach (['0', '00', '-3', '1.5', 'abc', '', ' 2', '2 ', '+2', '1e3', '٣'] as $raw) {
+    same(var_export($raw, true) . ' es la página 1', 1, parse_page($raw));
+}
+same('null (no llegó)', 1, parse_page(null));
+same('un arreglo (?page[]=2)', 1, parse_page(['2']));
+same('un int real no es texto de la petición', 1, parse_page(5));
+same('16 dígitos: no cabe con holgura, se trata como "más allá de la última"', PHP_INT_MAX, parse_page('9999999999999999'));
+same('23 dígitos: igual', PHP_INT_MAX, parse_page('99999999999999999999999'));
+
+section('paginate(): total de páginas, corrección del rango y filas mostradas');
+same('0 usuarios: una sola página, vacía (nunca cero páginas)', ['page' => 1, 'pages' => 1, 'perPage' => 10, 'offset' => 0, 'total' => 0, 'from' => 0, 'to' => 0], paginate(0, 1));
+same('1 usuario', [1, 1, 1], [paginate(1, 1)['pages'], paginate(1, 1)['from'], paginate(1, 1)['to']]);
+same('10 usuarios caben en una página', [1, 10], [paginate(10, 1)['pages'], paginate(10, 1)['to']]);
+same('11 usuarios necesitan dos', 2, paginate(11, 1)['pages']);
+same('11 usuarios, página 2: solo la fila 11', [10, 11, 11], [paginate(11, 2)['offset'], paginate(11, 2)['from'], paginate(11, 2)['to']]);
+same('35 usuarios son 4 páginas', 4, paginate(35, 1)['pages']);
+same('35 usuarios, página 4: filas 31 a 35', [30, 31, 35], [paginate(35, 4)['offset'], paginate(35, 4)['from'], paginate(35, 4)['to']]);
+same('?page=999 con 35 usuarios muestra la 4, no una vacía', 4, paginate(35, 999)['page']);
+same('PHP_INT_MAX también se corrige a la última', 4, paginate(35, PHP_INT_MAX)['page']);
+same('la página 0 se corrige a la 1', 1, paginate(35, 0)['page']);
+same('un total negativo se trata como 0', 0, paginate(-5, 1)['total']);
+same('con otro tamaño de página (5): 11 usuarios son 3 páginas', 3, paginate(11, 1, 5)['pages']);
+// Propiedad: para cualquier total y cualquier página pedida, las páginas cubren TODAS las filas, sin huecos ni repeticiones.
+$violations = [];
+for ($total = 0; $total <= 120; $total++) {
+    $covered = 0;
+    $pages = paginate($total, 1)['pages'];
+    for ($requested = 1; $requested <= $pages; $requested++) {
+        $info = paginate($total, $requested);
+        $rows = $info['to'] - $info['from'] + 1;
+        $covered += $total === 0 ? 0 : $rows;
+        if ($info['offset'] < 0 || $info['page'] !== $requested || ($total > 0 && ($info['from'] !== $info['offset'] + 1 || $info['to'] > $total || $rows < 1 || $rows > 10))) {
+            $violations[] = "total=$total página=$requested";
+        }
+    }
+    if ($covered !== $total) {
+        $violations[] = "total=$total cubierto=$covered";
+    }
+    if (paginate($total, $pages + 50)['page'] !== $pages) {
+        $violations[] = "total=$total no corrige una página fuera de rango";
+    }
+}
+same('propiedad: para cualquier total de 0 a 120, las páginas cubren todas las filas sin huecos ni repeticiones', [], $violations);
+
+section('page_links(): primera, última y las cercanas a la actual; huecos solo si faltan 2 o más');
+same('una sola página', [1], page_links(1, 1));
+same('5 páginas, en la 3: todas', [1, 2, 3, 4, 5], page_links(3, 5));
+same('20 páginas, en la 1', [1, 2, 3, null, 20], page_links(1, 20));
+same('20 páginas, en la 10', [1, null, 8, 9, 10, 11, 12, null, 20], page_links(10, 20));
+same('20 páginas, en la última', [1, null, 18, 19, 20], page_links(20, 20));
+same('8 páginas, en la 1: el hueco es de 4, se pinta ...', [1, 2, 3, null, 8], page_links(1, 8));
+same('8 páginas, en la 5: un hueco de UNA página se escribe, no se tapa con ...', [1, 2, 3, 4, 5, 6, 7, 8], page_links(5, 8));
+same('500 páginas, en la 250', [1, null, 248, 249, 250, 251, 252, null, 500], page_links(250, 500));
+$linkViolations = [];
+for ($pages = 1; $pages <= 40; $pages++) {
+    for ($page = 1; $page <= $pages; $page++) {
+        $links = page_links($page, $pages);
+        $numbers = array_values(array_filter($links, static fn($n) => $n !== null));
+        if (!in_array($page, $numbers, true) || $numbers[0] !== 1 || end($numbers) !== $pages || $numbers !== array_values(array_unique($numbers)) || $numbers !== (function (array $n): array { sort($n); return $n; })($numbers)) {
+            $linkViolations[] = "pages=$pages page=$page";
+        }
+        if ($links[0] === null || end($links) === null) {
+            $linkViolations[] = "hueco en un extremo pages=$pages page=$page";
+        }
+        foreach ($links as $i => $n) {
+            if ($n === null && ($links[$i - 1] ?? null) !== null && ($links[$i + 1] ?? null) !== null && $links[$i + 1] - $links[$i - 1] < 3) {
+                $linkViolations[] = "hueco que tapa menos de 2 páginas pages=$pages page=$page";
+            }
+        }
+    }
+}
+same('propiedad: siempre están la actual, la primera y la última, en orden, sin repetir y sin huecos inútiles (1 a 40 páginas)', [], $linkViolations);
+
+section('list_state() y list_url(): una sola URL por estado, bien codificada');
+same('sin búsqueda y en la 1: no hay parámetros', [], list_state('', 1));
+same('solo búsqueda', ['q' => 'laura'], list_state('laura', 1));
+same('solo página', ['page' => 3], list_state('', 3));
+same('búsqueda y página', ['q' => 'laura', 'page' => 3], list_state('laura', 3));
+same('la página 1 se omite (así no hay dos URL para lo mismo)', 'index.php', list_url('', 1));
+same('con búsqueda', 'index.php?q=laura', list_url('laura'));
+same('con búsqueda y página', 'index.php?q=laura&page=2', list_url('laura', 2));
+same('con un parámetro extra delante', 'index.php?msg=deleted', list_url('', 1, ['msg' => 'deleted']));
+same('extra, búsqueda y página', 'index.php?msg=updated&q=laura&page=2', list_url('laura', 2, ['msg' => 'updated']));
+same('los espacios se codifican (%20)', 'index.php?q=laura%20gomez', list_url('laura gomez'));
+same('las tildes se codifican en UTF-8', 'index.php?q=G%C3%B3mez', list_url('Gómez'));
+same('un & del texto no abre otro parámetro', 'index.php?q=a%26b%3Dc%23x', list_url('a&b=c#x'));
+same('un salto de línea no puede colar otra cabecera', false, str_contains(list_url("a\r\nSet-Cookie: x=1"), "\n") || str_contains(list_url("a\r\nSet-Cookie: x=1"), "\r"));
+same('el salto de línea queda como %0D%0A', true, str_contains(list_url("a\r\nSet-Cookie: x=1"), '%0D%0A'));
+foreach (['laura', 'laura gomez', 'a&b=c#x', 'Gómez', '100%', "O'Brien", '<script>', '李雷', 'a+b'] as $term) {
+    parse_str((string) parse_url(list_url($term, 4), PHP_URL_QUERY), $back);
+    same("ida y vuelta de «{$term}»", ['q' => $term, 'page' => '4'], $back);
+}
+
+finish();

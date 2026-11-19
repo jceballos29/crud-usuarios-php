@@ -8,6 +8,7 @@ declare(strict_types=1);
  * @var string|null $errorMessage
  * @var array<int, array{id: int|string, name: string, last_name: string, email: string, phone: ?string, created_at: string}> $users
  * @var string $search Término buscado ya limpio ('' si no hay búsqueda); parse_search_term() en user-search.php.
+ * @var array{page: int, pages: int, perPage: int, offset: int, total: int, from: int, to: int} $pagination Resultado de paginate().
  */
 ?>
 <?php if ($errorMessage !== null): ?>
@@ -18,7 +19,7 @@ declare(strict_types=1);
 <?php endif; ?>
 
 <div class="d-flex align-items-center justify-content-between">
-    <h1 class="mb-4">Lista de Usuarios <?= $users ? '(' . count($users) . ')' : '' ?></h1>
+    <h1 class="mb-4">Lista de Usuarios <?= $pagination['total'] > 0 ? '(' . $pagination['total'] . ')' : '' ?></h1>
     <a class="btn-solid theme-primary" href="create.php" role="button">Registrar usuario</a>
 </div>
 
@@ -47,8 +48,18 @@ declare(strict_types=1);
     <?php return; ?>
 <?php endif; ?>
 
-<?php if ($search !== ''): ?>
-    <p class="mb-2"><?= count($users) === 1 ? '1 resultado' : count($users) . ' resultados' ?> para «<?= escape($search) ?>».</p>
+<?php /* Estado del listado (búsqueda y página YA corregida): lo llevan los enlaces de editar y los formularios de eliminar para volver aquí. */ ?>
+<?php $listState = list_state($search, $pagination['page']); ?>
+
+<?php if ($search !== '' || $pagination['pages'] > 1): ?>
+    <p class="mb-2">
+        <?php if ($search !== ''): ?>
+            <?= $pagination['total'] === 1 ? '1 resultado' : $pagination['total'] . ' resultados' ?> para «<?= escape($search) ?>»<?= $pagination['pages'] > 1 ? ' · ' : '.' ?>
+        <?php endif; ?>
+        <?php if ($pagination['pages'] > 1): ?>
+            Mostrando <?= $pagination['from'] ?> a <?= $pagination['to'] ?><?= $search === '' ? ' de ' . $pagination['total'] : '' ?>.
+        <?php endif; ?>
+    </p>
 <?php endif; ?>
 
 <table class="table">
@@ -73,10 +84,13 @@ declare(strict_types=1);
                 <td>
                     <?php $fullName = $user['name'] . ' ' . $user['last_name']; ?>
                     <div class="d-flex align-items-center">
-                        <a class="btn-subtle theme-warning btn-icon me-2" href="edit.php?id=<?= escape($user['id']) ?>" role="button" title="Editar" aria-label="Editar a <?= escape($fullName) ?>"><i class="bi bi-pencil" aria-hidden="true"></i></a>
+                        <a class="btn-subtle theme-warning btn-icon me-2" href="<?= escape('edit.php?' . http_build_query(['id' => $user['id']] + $listState, '', '&', PHP_QUERY_RFC3986)) ?>" role="button" title="Editar" aria-label="Editar a <?= escape($fullName) ?>"><i class="bi bi-pencil" aria-hidden="true"></i></a>
                         <?php /* data-confirm lo lee js/confirm-submit.js: sin onsubmit en línea (compatible con la CSP) y solo hace falta escapar para HTML. */ ?>
                         <form method="post" action="delete.php" class="d-inline" data-confirm="<?= escape(sprintf('¿Eliminar a %s?', $fullName)) ?>">
                             <input type="hidden" name="id" value="<?= escape($user['id']) ?>">
+                            <?php foreach ($listState as $stateName => $stateValue): ?>
+                                <input type="hidden" name="<?= escape($stateName) ?>" value="<?= escape($stateValue) ?>">
+                            <?php endforeach; ?>
                             <button type="submit" class="btn-subtle theme-danger btn-icon" title="Eliminar" aria-label="Eliminar a <?= escape($fullName) ?>"><i class="bi bi-trash-fill" aria-hidden="true"></i></button>
                         </form>
                     </div>
@@ -85,3 +99,5 @@ declare(strict_types=1);
         <?php endforeach; ?>
     </tbody>
 </table>
+
+<?php require __DIR__ . '/pagination.php'; ?>

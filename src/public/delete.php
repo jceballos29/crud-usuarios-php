@@ -5,6 +5,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/request-guard.php';
+require_once __DIR__ . '/../includes/user-search.php';
+require_once __DIR__ . '/../includes/pagination.php';
 
 // delete.php solo atiende POST y casi nunca muestra pantalla: borra y redirige.
 // Cualquier otro método (GET al escribir la URL, PUT, DELETE...) recibe 405 y no se toca nada.
@@ -32,6 +34,11 @@ try {
         exit;
     }
 
+    // Estado del listado desde el que se pulsó Eliminar (búsqueda y página), para volver a él. Si era
+    // el último usuario de la última página, index.php corrige la página y se vuelve a la nueva última.
+    $returnSearch = parse_search_term($_POST['q'] ?? null);
+    $returnPage = parse_page($_POST['page'] ?? null);
+
     require_once __DIR__ . '/../includes/connection.php';
 
     $stmt = $pdo->prepare('DELETE FROM users WHERE id = :id');
@@ -42,7 +49,7 @@ try {
     // (rowCount() cuenta las filas encontradas: connection.php activa Pdo\Mysql::ATTR_FOUND_ROWS.)
     $result = $stmt->rowCount() > 0 ? 'deleted' : 'missing';
 
-    header('Location: index.php?msg=' . $result);
+    header('Location: ' . list_url($returnSearch, $returnPage, ['msg' => $result]));
     exit;
 } catch (RuntimeException $error) {
     [$status, $errorMessage] = describe_failure($error, 'No se pudo eliminar el usuario. Inténtalo más tarde.');

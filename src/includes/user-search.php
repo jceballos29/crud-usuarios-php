@@ -61,7 +61,8 @@ function like_pattern(string $term): string
 }
 
 /**
- * Consulta del listado, con o sin búsqueda.
+ * Condición WHERE de la búsqueda, compartida por el listado y por el recuento (así los dos siempre
+ * hablan de las mismas filas).
  *
  * Con texto busca en nombre, apellido, nombre completo ("Laura Gómez"), correo y teléfono. Como PDO
  * trabaja con consultas preparadas de verdad (EMULATE_PREPARES apagado), **no se puede repetir un
@@ -72,15 +73,13 @@ function like_pattern(string $term): string
  * que el visitante teclea llega al texto de la consulta. MySQL ignora mayúsculas y tildes en
  * `utf8mb4_unicode_ci`, de modo que "gomez" encuentra a "Gómez".
  *
- * @param string $term Término ya limpio con parse_search_term(), o '' para listar todo.
- * @return array{0: string, 1: array<string, string>} [consulta SQL, parámetros para execute()]
+ * @param string $term Término ya limpio con parse_search_term(), o '' para no filtrar.
+ * @return array{0: string, 1: array<string, string>} [condición (vacía o " WHERE ..."), parámetros]
  */
-function user_list_query(string $term): array
+function user_search_where(string $term): array
 {
-    $select = 'SELECT id, name, last_name, email, phone, created_at FROM users';
-
     if ($term === '') {
-        return [$select . ' ORDER BY id DESC', []];
+        return ['', []];
     }
 
     $searchable = ['name', 'last_name', "CONCAT(name, ' ', last_name)", 'email', 'phone'];
@@ -93,5 +92,45 @@ function user_list_query(string $term): array
         $params[":q$index"] = $pattern;
     }
 
-    return [$select . ' WHERE ' . implode(' OR ', $conditions) . ' ORDER BY id DESC', $params];
+    return [' WHERE ' . implode(' OR ', $conditions), $params];
+}
+
+/**
+ * Consulta del recuento: cuántos usuarios cumplen la búsqueda (o cuántos hay, sin búsqueda). Hace falta
+ * para saber cuántas páginas hay; no se puede deducir de la página que se pide.
+ *
+ * @param string $term Término ya limpio con parse_search_term(), o ''.
+ * @return array{0: string, 1: array<string, string>} [consulta SQL, parámetros]
+ */
+function user_count_query(string $term): array
+{
+    [$where, $params] = user_search_where($term);
+
+    return ['SELECT COUNT(*) FROM users' . $where, $params];
+}
+
+/**
+ * Consulta de UNA página del listado, con o sin búsqueda.
+ *
+ * Los parámetros de LIMIT y OFFSET son **enteros de PHP** y hay que enlazarlos como tales
+ * (bind_all() en helpers.php los enlaza con PDO::PARAM_INT). Con consultas nativas MySQL perdona un
+ * texto como "10", pero con consultas emuladas PDO escribiría `LIMIT '10'` y daría un error de sintaxis.
+ * Se fuerzan a un valor válido (LIMIT >= 1, OFFSET >= 0) porque MySQL rechaza los negativos.
+ *
+ * El orden es por `id DESC`, que es único: así dos páginas nunca repiten ni se saltan una fila. Si se
+ * ordenara por una columna con valores repetidos haría falta desempatar por id.
+ *
+ * @param string $term Término ya limpio con parse_search_term(), o ''.
+ * @param int $limit Filas por página.
+ * @param int $offset Filas que se saltan: (página - 1) * filas por página.
+ * @return array{0: string, 1: array<string, string|int>} [consulta SQL, parámetros para bind_all()]
+ */
+function user_list_query(string $term, int $limit, int $offset): array
+{
+    [$where, $params] = user_search_where($term);
+
+    $sql = 'SELECT id, name, last_name, email, phone, created_at FROM users' . $where
+        . ' ORDER BY id DESC LIMIT :limit OFFSET :offset';
+
+    return [$sql, $params + [':limit' => max(1, $limit), ':offset' => max(0, $offset)]];
 }
