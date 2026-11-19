@@ -56,7 +56,7 @@ if (!$notFound) {
         require_once __DIR__ . '/../includes/connection.php';
 
         // Cargar (también al enviar el POST: un usuario borrado entre tanto debe dar 404).
-        $stmt = $pdo->prepare('SELECT name, last_name, email, phone FROM users WHERE id = :id');
+        $stmt = $pdo->prepare('SELECT name, last_name, email, phone, document, birth_date, role FROM users WHERE id = :id');
         $stmt->execute([':id' => $userId]);
         $user = $stmt->fetch(); // false si no hay fila
 
@@ -77,15 +77,9 @@ if (!$notFound) {
                 $errors = validate_user($data, $fields);
 
                 if ($errors === []) {
-                    $sql = 'UPDATE users SET name = :name, last_name = :last_name, email = :email, phone = :phone WHERE id = :id';
+                    $sql = 'UPDATE users SET name = :name, last_name = :last_name, email = :email, phone = :phone, document = :document, birth_date = :birth_date, role = :role WHERE id = :id';
                     $stmt = $pdo->prepare($sql);
-                    $stmt->execute([
-                        ':name' => $data['name'],
-                        ':last_name' => $data['last_name'],
-                        ':email' => $data['email'],
-                        ':phone' => $data['phone'] !== '' ? $data['phone'] : null,
-                        ':id' => $userId,
-                    ]);
+                    $stmt->execute(user_db_params($data) + [':id' => $userId]);
 
                     // connection.php activa FOUND_ROWS: rowCount() cuenta las filas que coinciden con el
                     // WHERE aunque los valores no cambien, así que 0 significa que el usuario ya no existe
@@ -101,21 +95,24 @@ if (!$notFound) {
                     http_response_code(422);
                 }
             } else {
-                // Rellenar con lo guardado. phone puede ser NULL y el formulario espera texto.
-                $data = [
-                    'name' => (string) $user['name'],
-                    'last_name' => (string) $user['last_name'],
-                    'email' => (string) $user['email'],
-                    'phone' => (string) ($user['phone'] ?? ''),
-                ];
+                // Rellenar con lo guardado. Lo opcional puede ser NULL y el formulario espera texto.
+                foreach (array_keys($fields) as $fieldName) {
+                    $data[$fieldName] = (string) ($user[$fieldName] ?? '');
+                }
             }
         }
     } catch (RuntimeException $error) {
-        // 1062 = correo duplicado (UNIQUE). Aquí significa que lo usa otro usuario:
-        // guardar sin cambiar el correo no choca, el registro no entra en conflicto consigo mismo.
-        if ($error instanceof PDOException && ($error->errorInfo[1] ?? null) === 1062) {
+        // 1062 = correo o documento duplicado (UNIQUE). Aquí significa que lo usa otro usuario:
+        // guardar sin cambiarlo no choca, el registro no entra en conflicto consigo mismo.
+        $duplicate = $error instanceof PDOException && ($error->errorInfo[1] ?? null) === 1062
+            ? duplicate_user_field((string) ($error->errorInfo[2] ?? ''))
+            : null;
+
+        if ($duplicate !== null) {
             http_response_code(409);
-            $errors['email'] = 'Ya existe otro usuario registrado con ese correo.';
+            $errors[$duplicate] = $duplicate === 'email'
+                ? 'Ya existe otro usuario registrado con ese correo.'
+                : 'Ya existe otro usuario registrado con ese documento.';
         } else {
             [$status, $errorMessage] = describe_failure($error, 'No se pudo completar la operación. Inténtalo más tarde.');
             http_response_code($status);

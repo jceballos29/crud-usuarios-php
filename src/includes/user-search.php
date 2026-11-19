@@ -64,7 +64,7 @@ function like_pattern(string $term): string
  * Condición WHERE de la búsqueda, compartida por el listado y por el recuento (así los dos siempre
  * hablan de las mismas filas).
  *
- * Con texto busca en nombre, apellido, nombre completo ("Laura Gómez"), correo y teléfono. Como PDO
+ * Con texto busca en nombre, apellido, nombre completo ("Laura Gómez"), correo, teléfono y documento. Como PDO
  * trabaja con consultas preparadas de verdad (EMULATE_PREPARES apagado), **no se puede repetir un
  * mismo marcador**: usar `:q` tres veces da el error HY093 "Invalid parameter number". Cada columna
  * lleva su marcador (`:q0`, `:q1`...), y todos reciben el mismo patrón.
@@ -82,7 +82,7 @@ function user_search_where(string $term): array
         return ['', []];
     }
 
-    $searchable = ['name', 'last_name', "CONCAT(name, ' ', last_name)", 'email', 'phone'];
+    $searchable = ['name', 'last_name', "CONCAT(name, ' ', last_name)", 'email', 'phone', 'document'];
     $pattern = like_pattern($term);
     $conditions = [];
     $params = [];
@@ -129,7 +129,7 @@ function user_list_query(string $term, int $limit, int $offset): array
 {
     [$where, $params] = user_search_where($term);
 
-    $sql = 'SELECT id, name, last_name, email, phone, created_at FROM users' . $where
+    $sql = 'SELECT id, name, last_name, email, phone, document, birth_date, role, created_at FROM users' . $where
         . ' ORDER BY id DESC LIMIT :limit OFFSET :offset';
 
     return [$sql, $params + [':limit' => max(1, $limit), ':offset' => max(0, $offset)]];

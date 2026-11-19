@@ -23,21 +23,22 @@ if ($submitted) {
     if ($errors === []) {
         try {
             require_once __DIR__ . '/../includes/connection.php';
-            $sql = 'INSERT INTO users (name, last_name, email, phone) VALUES (:name, :last_name, :email, :phone)';
+            $sql = 'INSERT INTO users (name, last_name, email, phone, document, birth_date, role) VALUES (:name, :last_name, :email, :phone, :document, :birth_date, :role)';
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([
-                ':name' => $data['name'],
-                ':last_name' => $data['last_name'],
-                ':email' => $data['email'],
-                ':phone' => $data['phone'] !== '' ? $data['phone'] : null,
-            ]);
+            $stmt->execute(user_db_params($data));
             header('Location: index.php?msg=created');
             exit;
         } catch (RuntimeException $error) {
-            // 1062 = entrada duplicada (columna email UNIQUE). 23000 es demasiado amplio.
-            if ($error instanceof PDOException && ($error->errorInfo[1] ?? null) === 1062) {
+            // 1062 = entrada duplicada (UNIQUE de email o de document). 23000 es demasiado amplio.
+            $duplicate = $error instanceof PDOException && ($error->errorInfo[1] ?? null) === 1062
+                ? duplicate_user_field((string) ($error->errorInfo[2] ?? ''))
+                : null;
+
+            if ($duplicate !== null) {
                 http_response_code(409);
-                $errors['email'] = 'Ya existe un usuario registrado con ese correo.';
+                $errors[$duplicate] = $duplicate === 'email'
+                    ? 'Ya existe un usuario registrado con ese correo.'
+                    : 'Ya existe un usuario registrado con ese documento.';
             } else {
                 [$status, $errorMessage] = describe_failure($error, 'No se pudo guardar el usuario. Inténtalo más tarde.');
                 http_response_code($status);

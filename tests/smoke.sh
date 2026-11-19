@@ -45,7 +45,7 @@ chk() {
 header_of() { grep -i "^$1:" "$TMP/head" | tr -d '\r' | head -1; }
 id_of() { sql "SELECT id FROM users WHERE email='$1';"; }
 exists() { [ "$(sql "SELECT COUNT(*) FROM users WHERE id=$1;")" = 1 ]; }
-create() { curl -s -o /dev/null -H "Origin: $ORIGIN" --data-urlencode "name=$1" --data-urlencode "last_name=$2" -d "email=$3" "$BASE/create.php"; }
+create() { curl -s -o /dev/null -H "Origin: $ORIGIN" --data-urlencode "name=$1" --data-urlencode "last_name=$2" -d "role=user&email=$3" "$BASE/create.php"; }
 wait_db() {
     local i
     for i in $(seq 1 40); do [ "$(docker compose ps db --format '{{.Health}}')" = healthy ] && break; sleep 2; done
@@ -98,22 +98,22 @@ section "Crear (create.php)"
 chk "GET" 200 "$BASE/create.php"
 curl -s "$BASE/create.php" > "$TMP/form.html"
 tr -d '\n' < "$TMP/form.html" | grep -qE 'type="tel"[^>]*id="phone"'; ok "el teléfono es un campo type=\"tel\"" $?
-[ "$(grep -c 'autocomplete="off"' "$TMP/form.html")" = 4 ]; ok "los 4 campos llevan autocomplete=\"off\" (son datos de otra persona)" $?
-chk "POST válido SIN Origin ni Referer" 403 -d "name=Ana&last_name=Ruiz&email=smoke-sinorigen@example.com" "$BASE/create.php"
+[ "$(grep -c 'autocomplete="off"' "$TMP/form.html")" = 7 ]; ok "los 7 campos llevan autocomplete=\"off\" (son datos de otra persona)" $?
+chk "POST válido SIN Origin ni Referer" 403 -d "role=user&name=Ana&last_name=Ruiz&email=smoke-sinorigen@example.com" "$BASE/create.php"
 [ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-sinorigen@example.com';")" = 0 ]; ok "el 403 no creó ningún usuario" $?
-chk "POST válido con Origin ajeno" 403 -H "Origin: http://evil.example" -d "name=Ana&last_name=Ruiz&email=smoke-sinorigen@example.com" "$BASE/create.php"
+chk "POST válido con Origin ajeno" 403 -H "Origin: http://evil.example" -d "role=user&name=Ana&last_name=Ruiz&email=smoke-sinorigen@example.com" "$BASE/create.php"
 [ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-sinorigen@example.com';")" = 0 ]; ok "con Origin ajeno tampoco se creó" $?
-chk "POST inválido SIN Origin (403 antes que 422)" 403 -d "name=&last_name=&email=" "$BASE/create.php"
-chk "POST con Origin: null" 403 -H "Origin: null" -d "name=Ana&last_name=Ruiz&email=smoke-sinorigen@example.com" "$BASE/create.php"
-chk "POST con solo Referer correcto" 302 -H "Referer: $ORIGIN/create.php" -d "name=Ref&last_name=Erer&email=smoke-ref@example.com" "$BASE/create.php"
-chk "POST vacío" 422 -H "Origin: $ORIGIN" -d "name=&last_name=&email=" "$BASE/create.php"
-chk "POST con teléfono sin dígitos" 422 -H "Origin: $ORIGIN" -d "name=Ana&last_name=Ruiz&email=smoke-x@example.com&phone=-------" "$BASE/create.php"
-chk "POST con name[] (un arreglo)" 422 -H "Origin: $ORIGIN" -d "name[]=x&last_name=Ruiz&email=smoke-x@example.com" "$BASE/create.php"
-chk "POST con el correo de un usuario existente" 409 -H "Origin: $ORIGIN" -d "name=Ana&last_name=Ruiz&email=$(sql 'SELECT email FROM users ORDER BY id LIMIT 1;')" "$BASE/create.php"
-chk "POST válido (correo en mayúsculas)" 302 -H "Origin: $ORIGIN" -d "name=Smoke&last_name=Uno&email=SMOKE-One@Example.com&phone=%2B57%20300%20123%204567" "$BASE/create.php"
+chk "POST inválido SIN Origin (403 antes que 422)" 403 -d "role=user&name=&last_name=&email=" "$BASE/create.php"
+chk "POST con Origin: null" 403 -H "Origin: null" -d "role=user&name=Ana&last_name=Ruiz&email=smoke-sinorigen@example.com" "$BASE/create.php"
+chk "POST con solo Referer correcto" 302 -H "Referer: $ORIGIN/create.php" -d "role=user&name=Ref&last_name=Erer&email=smoke-ref@example.com" "$BASE/create.php"
+chk "POST vacío" 422 -H "Origin: $ORIGIN" -d "role=user&name=&last_name=&email=" "$BASE/create.php"
+chk "POST con teléfono sin dígitos" 422 -H "Origin: $ORIGIN" -d "role=user&name=Ana&last_name=Ruiz&email=smoke-x@example.com&phone=-------" "$BASE/create.php"
+chk "POST con name[] (un arreglo)" 422 -H "Origin: $ORIGIN" -d "role=user&name[]=x&last_name=Ruiz&email=smoke-x@example.com" "$BASE/create.php"
+chk "POST con el correo de un usuario existente" 409 -H "Origin: $ORIGIN" -d "role=user&name=Ana&last_name=Ruiz&email=$(sql 'SELECT email FROM users ORDER BY id LIMIT 1;')" "$BASE/create.php"
+chk "POST válido (correo en mayúsculas)" 302 -H "Origin: $ORIGIN" -d "role=user&name=Smoke&last_name=Uno&email=SMOKE-One@Example.com&phone=%2B57%20300%20123%204567" "$BASE/create.php"
 header_of location | grep -q 'msg=created'; ok "redirige a msg=created" $?
 U1=$(id_of smoke-one@example.com); [ -n "$U1" ]; ok "el correo se guardó en minúsculas" $?
-chk "POST con un nombre con punto medio (Cal·lís)" 302 -H "Origin: $ORIGIN" --data-urlencode "name=Pere" --data-urlencode "last_name=Cal·lís" -d "email=smoke-cat@example.com" "$BASE/create.php"
+chk "POST con un nombre con punto medio (Cal·lís)" 302 -H "Origin: $ORIGIN" --data-urlencode "name=Pere" --data-urlencode "last_name=Cal·lís" -d "role=user&email=smoke-cat@example.com" "$BASE/create.php"
 [ "$(sql "SELECT last_name FROM users WHERE email='smoke-cat@example.com';")" = "Cal·lís" ]; ok "el apellido con punto medio se guardó bien (utf8mb4)" $?
 
 section "Listado: fecha local, escape y accesibilidad"
@@ -131,7 +131,7 @@ STORED=$(sql "SELECT created_at FROM users WHERE id=$UO;")
 
 section "Búsqueda (M1): GET ?q=texto"
 # Usuarios de prueba: uno con tildes y teléfono, y dos parejas para probar los comodines de LIKE.
-curl -s -o /dev/null -H "Origin: $ORIGIN" --data-urlencode "name=Zoé" --data-urlencode "last_name=Núñez-Smoke" -d "email=smoke-busq-a@example.com" --data-urlencode "phone=+57 300 777 8888" "$BASE/create.php"
+curl -s -o /dev/null -H "Origin: $ORIGIN" --data-urlencode "name=Zoé" --data-urlencode "last_name=Núñez-Smoke" -d "role=user&email=smoke-busq-a@example.com" --data-urlencode "phone=+57 300 777 8888" "$BASE/create.php"
 create "Pct%Real" "Smoke" "smoke-busq-b@example.com"
 create "PctXReal" "Smoke" "smoke-busq-c@example.com"
 create "Sub_Real" "Smoke" "smoke-busq-d@example.com"
@@ -224,13 +224,13 @@ EDIT_ID=$(printf '%s\n' "$IDS2" | head -1)
 chk "abrir el formulario de edición desde la página 2" 200 "$BASE/edit.php?id=$EDIT_ID&q=smoke-pag&page=2"
 grep -qF 'href="index.php?q=smoke-pag&amp;page=2">Cancelar</a>' "$TMP/body"; ok "\"Cancelar\" vuelve a la búsqueda y a la página 2" $?
 tr -d '\n' < "$TMP/body" | grep -qE 'name="q" value="smoke-pag">\s*<input type="hidden" name="page" value="2"'; ok "el formulario lleva q y page en campos ocultos" $?
-chk "guardar desde la página 2" 302 -H "Origin: $ORIGIN" -d "id=$EDIT_ID&q=smoke-pag&page=2&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
+chk "guardar desde la página 2" 302 -H "Origin: $ORIGIN" -d "role=user&id=$EDIT_ID&q=smoke-pag&page=2&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
 [ "$(header_of location)" = "Location: index.php?msg=updated&q=smoke-pag&page=2" ]; ok "...y vuelve a la misma búsqueda y página (con el aviso)" $?
-chk "guardar sin estado (como antes de M2)" 302 -H "Origin: $ORIGIN" -d "id=$EDIT_ID&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
+chk "guardar sin estado (como antes de M2)" 302 -H "Origin: $ORIGIN" -d "role=user&id=$EDIT_ID&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
 [ "$(header_of location)" = "Location: index.php?msg=updated" ]; ok "...sin estado sigue yendo a index.php?msg=updated" $?
-chk "estado hostil al guardar (page=abc, q como arreglo)" 302 -H "Origin: $ORIGIN" --data-urlencode "q[]=x" -d "id=$EDIT_ID&page=abc&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
+chk "estado hostil al guardar (page=abc, q como arreglo)" 302 -H "Origin: $ORIGIN" --data-urlencode "q[]=x" -d "role=user&id=$EDIT_ID&page=abc&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
 [ "$(header_of location)" = "Location: index.php?msg=updated" ]; ok "...un estado inválido se ignora" $?
-chk "q con un salto de línea para colar otra cabecera" 302 -H "Origin: $ORIGIN" --data-urlencode $'q=a\r\nSet-Cookie: hack=1' -d "id=$EDIT_ID&page=2&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
+chk "q con un salto de línea para colar otra cabecera" 302 -H "Origin: $ORIGIN" --data-urlencode $'q=a\r\nSet-Cookie: hack=1' -d "role=user&id=$EDIT_ID&page=2&name=Paginado&last_name=Editado&email=smoke-pag-edit@example.com&phone=" "$BASE/edit.php"
 ! grep -qi '^Set-Cookie' "$TMP/head"; ok "...no se cuela ninguna cabecera Set-Cookie" $?
 [ "$(header_of location)" = "Location: index.php?msg=updated&q=a%20Set-Cookie%3A%20hack%3D1&page=2" ]; ok "...el salto de línea queda como un espacio y todo el texto codificado en el Location" $?
 
@@ -255,43 +255,119 @@ for q in "" "?id=abc" "?id%5B%5D=1" "?id=0" "?id=-3" "?id=9999" "?id=4294967296"
     chk "GET edit.php$q" 404 "$BASE/edit.php$q"
 done
 chk "POST sin id" 404 -H "Origin: $ORIGIN" -d "name=A&last_name=B&email=a@b.co" "$BASE/edit.php"
-chk "POST con un id inexistente" 404 -H "Origin: $ORIGIN" -d "id=9999&name=Ana&last_name=B&email=a@b.co" "$BASE/edit.php"
+chk "POST con un id inexistente" 404 -H "Origin: $ORIGIN" -d "role=user&id=9999&name=Ana&last_name=B&email=a@b.co" "$BASE/edit.php"
 chk "GET con un id válido" 200 "$BASE/edit.php?id=$U1"
 tr -d '\n' < "$TMP/body" | grep -qE 'id="last_name"[^>]*value="Uno"'; ok "carga los datos actuales" $?
-chk "POST SIN Origin (403 antes que mirar los datos)" 403 -d "id=$U1&name=Hack&last_name=Hack&email=smoke-one@example.com" "$BASE/edit.php"
+chk "POST SIN Origin (403 antes que mirar los datos)" 403 -d "role=user&id=$U1&name=Hack&last_name=Hack&email=smoke-one@example.com" "$BASE/edit.php"
 [ "$(sql "SELECT last_name FROM users WHERE id=$U1;")" = "Uno" ]; ok "el 403 no modificó al usuario" $?
-chk "POST con Origin ajeno" 403 -H "Origin: http://evil.example" -d "id=$U1&name=Hack&last_name=Hack&email=smoke-one@example.com" "$BASE/edit.php"
-chk "POST SIN Origin con un id inexistente (403 antes que 404)" 403 -d "id=9999&name=A&last_name=B&email=a@b.co" "$BASE/edit.php"
-chk "POST SIN Origin con datos inválidos (403 antes que 422)" 403 -d "id=$U1&name=&last_name=&email=" "$BASE/edit.php"
-chk "POST con solo Referer correcto" 302 -H "Referer: $ORIGIN/edit.php?id=$U1" -d "id=$U1&name=Smoke&last_name=Uno&email=smoke-one@example.com&phone=%2B57%20300%20123%204567" "$BASE/edit.php"
-chk "POST con el nombre vacío" 422 -H "Origin: $ORIGIN" -d "id=$U1&name=&last_name=Uno&email=smoke-one@example.com" "$BASE/edit.php"
+chk "POST con Origin ajeno" 403 -H "Origin: http://evil.example" -d "role=user&id=$U1&name=Hack&last_name=Hack&email=smoke-one@example.com" "$BASE/edit.php"
+chk "POST SIN Origin con un id inexistente (403 antes que 404)" 403 -d "role=user&id=9999&name=A&last_name=B&email=a@b.co" "$BASE/edit.php"
+chk "POST SIN Origin con datos inválidos (403 antes que 422)" 403 -d "role=user&id=$U1&name=&last_name=&email=" "$BASE/edit.php"
+chk "POST con solo Referer correcto" 302 -H "Referer: $ORIGIN/edit.php?id=$U1" -d "role=user&id=$U1&name=Smoke&last_name=Uno&email=smoke-one@example.com&phone=%2B57%20300%20123%204567" "$BASE/edit.php"
+chk "POST con el nombre vacío" 422 -H "Origin: $ORIGIN" -d "role=user&id=$U1&name=&last_name=Uno&email=smoke-one@example.com" "$BASE/edit.php"
 grep -q "name=\"id\" value=\"$U1\"" "$TMP/body"; ok "conserva el id oculto" $?
-chk "POST con el correo de otro usuario" 409 -H "Origin: $ORIGIN" -d "id=$U1&name=Smoke&last_name=Uno&email=smoke-cat@example.com" "$BASE/edit.php"
-chk "POST sin cambiar ningún valor" 302 -H "Origin: $ORIGIN" -d "id=$U1&name=Smoke&last_name=Uno&email=smoke-one@example.com" --data-urlencode "phone=+57 300 123 4567" "$BASE/edit.php"
-chk "POST cambiando solo el apellido y vaciando el teléfono" 302 -H "Origin: $ORIGIN" -d "id=$U1&name=Smoke&last_name=Editado&email=smoke-one@example.com&phone=" "$BASE/edit.php"
+chk "POST con el correo de otro usuario" 409 -H "Origin: $ORIGIN" -d "role=user&id=$U1&name=Smoke&last_name=Uno&email=smoke-cat@example.com" "$BASE/edit.php"
+chk "POST sin cambiar ningún valor" 302 -H "Origin: $ORIGIN" -d "role=user&id=$U1&name=Smoke&last_name=Uno&email=smoke-one@example.com" --data-urlencode "phone=+57 300 123 4567" "$BASE/edit.php"
+chk "POST cambiando solo el apellido y vaciando el teléfono" 302 -H "Origin: $ORIGIN" -d "role=user&id=$U1&name=Smoke&last_name=Editado&email=smoke-one@example.com&phone=" "$BASE/edit.php"
 [ "$(sql "SELECT IFNULL(phone,'NULL') FROM users WHERE id=$U1;")" = NULL ]; ok "el teléfono vacío queda como NULL" $?
 
 section "Ediciones simultáneas (la persona A abre el formulario; la B guarda antes que ella)"
 token_of() { tr -d '\n' < "$TMP/body" | grep -oE 'name="row_token" value="[0-9a-f]{64}"' | grep -oE '[0-9a-f]{64}'; }
 chk "A abre el formulario de edición" 200 "$BASE/edit.php?id=$U1"
 TOKEN_A=$(token_of); [ -n "$TOKEN_A" ]; ok "el formulario lleva un row_token de 64 caracteres" $?
-chk "B guarda un cambio (sin token: se acepta como siempre)" 302 -H "Origin: $ORIGIN" -d "id=$U1&name=Smoke&last_name=DeB&email=smoke-one@example.com&phone=" "$BASE/edit.php"
-chk "A guarda con la huella VIEJA: conflicto" 409 -H "Origin: $ORIGIN" -d "id=$U1&row_token=$TOKEN_A&name=Smoke&last_name=DeA&email=smoke-one@example.com&phone=" "$BASE/edit.php"
+chk "B guarda un cambio (sin token: se acepta como siempre)" 302 -H "Origin: $ORIGIN" -d "role=user&id=$U1&name=Smoke&last_name=DeB&email=smoke-one@example.com&phone=" "$BASE/edit.php"
+chk "A guarda con la huella VIEJA: conflicto" 409 -H "Origin: $ORIGIN" -d "role=user&id=$U1&row_token=$TOKEN_A&name=Smoke&last_name=DeA&email=smoke-one@example.com&phone=" "$BASE/edit.php"
 [ "$(sql "SELECT last_name FROM users WHERE id=$U1;")" = "DeB" ]; ok "no se pisó lo que guardó B" $?
 grep -q 'Otra persona modificó a este usuario' "$TMP/body"; ok "el aviso explica qué pasó" $?
 grep -q 'value="DeA"' "$TMP/body"; ok "se conserva lo que había escrito A" $?
 grep -q "value=\"$TOKEN_A\"" "$TMP/body"; ok "se conserva la huella vieja: hay que recargar para poder guardar" $?
-chk "A insiste con la huella vieja (datos inválidos): el conflicto va antes que el 422" 409 -H "Origin: $ORIGIN" -d "id=$U1&row_token=$TOKEN_A&name=&last_name=&email=" "$BASE/edit.php"
+chk "A insiste con la huella vieja (datos inválidos): el conflicto va antes que el 422" 409 -H "Origin: $ORIGIN" -d "role=user&id=$U1&row_token=$TOKEN_A&name=&last_name=&email=" "$BASE/edit.php"
 chk "A recarga el formulario" 200 "$BASE/edit.php?id=$U1"
 TOKEN_A2=$(token_of); [ "$TOKEN_A2" != "$TOKEN_A" ]; ok "la huella nueva es distinta de la vieja" $?
-chk "A guarda con la huella NUEVA" 302 -H "Origin: $ORIGIN" -d "id=$U1&row_token=$TOKEN_A2&name=Smoke&last_name=DeA&email=smoke-one@example.com&phone=" "$BASE/edit.php"
+chk "A guarda con la huella NUEVA" 302 -H "Origin: $ORIGIN" -d "role=user&id=$U1&row_token=$TOKEN_A2&name=Smoke&last_name=DeA&email=smoke-one@example.com&phone=" "$BASE/edit.php"
 [ "$(sql "SELECT last_name FROM users WHERE id=$U1;")" = "DeA" ]; ok "ahora sí se guardó lo de A" $?
 chk "A abre otra vez" 200 "$BASE/edit.php?id=$U1"
 TOKEN_A3=$(token_of)
-chk "B guarda EXACTAMENTE los mismos valores" 302 -H "Origin: $ORIGIN" -d "id=$U1&name=Smoke&last_name=DeA&email=smoke-one@example.com&phone=" "$BASE/edit.php"
-chk "A guarda: no hay conflicto porque los datos no cambiaron" 302 -H "Origin: $ORIGIN" -d "id=$U1&row_token=$TOKEN_A3&name=Smoke&last_name=DeA2&email=smoke-one@example.com&phone=" "$BASE/edit.php"
-chk "un token mal formado se trata como un conflicto, no como un error" 409 -H "Origin: $ORIGIN" -d "id=$U1&row_token=basura&name=Smoke&last_name=X&email=smoke-one@example.com&phone=" "$BASE/edit.php"
-chk "con row_token como arreglo se ignora (como si no llegara)" 302 -H "Origin: $ORIGIN" --data-urlencode "row_token[]=x" -d "id=$U1&name=Smoke&last_name=DeA&email=smoke-one@example.com&phone=" "$BASE/edit.php"
+chk "B guarda EXACTAMENTE los mismos valores" 302 -H "Origin: $ORIGIN" -d "role=user&id=$U1&name=Smoke&last_name=DeA&email=smoke-one@example.com&phone=" "$BASE/edit.php"
+chk "A guarda: no hay conflicto porque los datos no cambiaron" 302 -H "Origin: $ORIGIN" -d "role=user&id=$U1&row_token=$TOKEN_A3&name=Smoke&last_name=DeA2&email=smoke-one@example.com&phone=" "$BASE/edit.php"
+chk "un token mal formado se trata como un conflicto, no como un error" 409 -H "Origin: $ORIGIN" -d "role=user&id=$U1&row_token=basura&name=Smoke&last_name=X&email=smoke-one@example.com&phone=" "$BASE/edit.php"
+chk "con row_token como arreglo se ignora (como si no llegara)" 302 -H "Origin: $ORIGIN" --data-urlencode "row_token[]=x" -d "role=user&id=$U1&name=Smoke&last_name=DeA&email=smoke-one@example.com&phone=" "$BASE/edit.php"
+
+section "Más campos (M3): documento, fecha de nacimiento y rol"
+chk "formulario de alta" 200 "$BASE/create.php"
+tr -d '\n' < "$TMP/body" | grep -qE 'type="date"[^>]*id="birth_date"|id="birth_date"[^>]*type="date"|type="date"\s+class="form-control"\s+id="birth_date"'; ok "la fecha de nacimiento es un <input type=\"date\">" $?
+[ "$(grep -cE '<option value="(user|editor|admin)"' "$TMP/body")" = 3 ]; ok "el rol es un <select> con exactamente 3 opciones" $?
+grep -qF '<option value="user" selected>Usuario</option>' "$TMP/body" && [ "$(grep -c ' selected' "$TMP/body")" = 1 ]; ok "...y solo «Usuario» viene seleccionado" $?
+grep -qE 'name="document"[^>]*maxlength="20"|maxlength="20"[^>]*name="document"' <(tr -d '\n' < "$TMP/body"); ok "el documento tiene maxlength=20" $?
+
+chk "alta con todos los campos (documento en minúsculas)" 302 -H "Origin: $ORIGIN" -d "name=Mas&last_name=Campos&email=smoke-m3-a@example.com&document=ab-12345&birth_date=1990-05-17&role=editor" "$BASE/create.php"
+UA=$(id_of smoke-m3-a@example.com)
+[ "$(sql "SELECT CONCAT(document,'|',birth_date,'|',role) FROM users WHERE id=$UA;")" = "AB-12345|1990-05-17|editor" ]; ok "se guardó: documento en MAYÚSCULAS, fecha y rol" $?
+chk "alta sin documento ni fecha" 302 -H "Origin: $ORIGIN" -d "name=Sin&last_name=Extras&email=smoke-m3-b@example.com&document=&birth_date=&role=user" "$BASE/create.php"
+chk "...y otra más (varios sin documento no chocan en el UNIQUE)" 302 -H "Origin: $ORIGIN" -d "name=Sin&last_name=Extras2&email=smoke-m3-c@example.com&document=&birth_date=&role=user" "$BASE/create.php"
+[ "$(sql "SELECT COUNT(*) FROM users WHERE email IN ('smoke-m3-b@example.com','smoke-m3-c@example.com') AND document IS NULL AND birth_date IS NULL;")" = 2 ]; ok "lo vacío se guardó como NULL (no como cadena vacía)" $?
+UB=$(id_of smoke-m3-b@example.com)
+
+chk "documento repetido" 409 -H "Origin: $ORIGIN" -d "name=Dup&last_name=Doc&email=smoke-m3-d@example.com&document=AB-12345&role=user" "$BASE/create.php"
+grep -qF 'Ya existe un usuario registrado con ese documento.' "$TMP/body"; ok "...con el aviso del documento (no el del correo)" $?
+! grep -qF 'ese correo' "$TMP/body"; ok "...y sin el aviso del correo" $?
+tr -d '\n' < "$TMP/body" | grep -qE 'id="document"[^>]*aria-invalid="true"'; ok "...el campo documento queda marcado" $?
+chk "documento repetido en otra capitalización (ab-12345)" 409 -H "Origin: $ORIGIN" -d "name=Dup&last_name=Doc&email=smoke-m3-d@example.com&document=ab-12345&role=user" "$BASE/create.php"
+chk "correo repetido: sigue avisando del correo" 409 -H "Origin: $ORIGIN" -d "name=Dup&last_name=Doc&email=smoke-m3-a@example.com&document=ZZ-99999&role=user" "$BASE/create.php"
+grep -qF 'Ya existe un usuario registrado con ese correo.' "$TMP/body"; ok "...con el aviso del correo" $?
+[ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-m3-d@example.com';")" = 0 ]; ok "ninguno de los repetidos se guardó" $?
+
+chk "rol inexistente (se manipuló el select)" 422 -H "Origin: $ORIGIN" -d "name=Rol&last_name=Falso&email=smoke-m3-e@example.com&role=superadmin" "$BASE/create.php"
+grep -qF 'Selecciona un rol de la lista.' "$TMP/body"; ok "...con su aviso" $?
+grep -qF '<option value="" selected disabled>Selecciona…</option>' "$TMP/body"; ok "...y el select vuelve sin ninguna opción elegida (no se pinta el valor falso)" $?
+! grep -q 'superadmin' "$TMP/body"; ok "...ni se refleja el valor manipulado" $?
+chk "rol con otra capitalización (ADMIN)" 422 -H "Origin: $ORIGIN" -d "name=Rol&last_name=Falso&email=smoke-m3-e@example.com&role=ADMIN" "$BASE/create.php"
+chk "rol vacío" 422 -H "Origin: $ORIGIN" -d "name=Rol&last_name=Falso&email=smoke-m3-e@example.com&role=" "$BASE/create.php"
+chk "sin rol (curl como antes de M3)" 422 -H "Origin: $ORIGIN" -d "name=Rol&last_name=Falso&email=smoke-m3-e@example.com" "$BASE/create.php"
+chk "rol como arreglo" 422 -H "Origin: $ORIGIN" -d "name=Rol&last_name=Falso&email=smoke-m3-e@example.com&role[]=admin" "$BASE/create.php"
+[ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-m3-e@example.com';")" = 0 ]; ok "ningún rol falso llegó a la BD" $?
+
+for bad in 2023-02-30 1990-13-01 17/05/1990 1990-5-17 ayer 2999-01-01 1899-12-31; do
+    chk "fecha de nacimiento inválida «$bad»" 422 -H "Origin: $ORIGIN" -d "name=Fe&last_name=Cha&email=smoke-m3-f@example.com&birth_date=$bad&role=user" "$BASE/create.php"
+done
+tr -d '\n' < "$TMP/body" | grep -qE 'name="birth_date"\s+value="1899-12-31"'; ok "...y el formulario conserva lo escrito en la fecha" $?
+chk "documento inválido (con espacios)" 422 -H "Origin: $ORIGIN" --data-urlencode "document=123 456" -d "name=Do&last_name=Cu&email=smoke-m3-f@example.com&role=user" "$BASE/create.php"
+chk "documento corto" 422 -H "Origin: $ORIGIN" -d "name=Do&last_name=Cu&email=smoke-m3-f@example.com&document=1234&role=user" "$BASE/create.php"
+chk "documento de 21 caracteres" 422 -H "Origin: $ORIGIN" -d "name=Do&last_name=Cu&email=smoke-m3-f@example.com&document=$(printf '9%.0s' $(seq 1 21))&role=user" "$BASE/create.php"
+[ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-m3-f@example.com';")" = 0 ]; ok "ninguno de los inválidos se guardó" $?
+
+section "Más campos (M3): listado y búsqueda"
+chk "listado buscando por documento (en minúsculas y a medias)" 200 --get --data-urlencode "q=b-123" "$BASE/"
+[ "$(grep -c 'edit.php?id=' "$TMP/body")" = 1 ] && grep -qF '<td>AB-12345</td>' "$TMP/body"; ok "la búsqueda encuentra por documento y lo muestra" $?
+tr -d '\n' < "$TMP/body" | grep -qE '<td>AB-12345</td>\s*<td>1990-05-17</td>\s*<td>Editor</td>'; ok "...con la fecha y la ETIQUETA del rol (Editor)" $?
+chk "listado de uno sin los campos nuevos" 200 --get --data-urlencode "q=smoke-m3-b" "$BASE/"
+tr -d '\n' < "$TMP/body" | grep -qE '<td>-</td>\s*<td>-</td>\s*<td>-</td>\s*<td>Usuario</td>'; ok "teléfono, documento y fecha vacíos se ven como «-» y el rol «Usuario»" $?
+
+section "Más campos (M3): edición, usuarios antiguos y ediciones simultáneas"
+chk "editar al usuario con todos los campos" 200 "$BASE/edit.php?id=$UA"
+tr -d '\n' < "$TMP/body" | grep -qE 'name="document"\s+value="AB-12345"'; ok "carga el documento" $?
+tr -d '\n' < "$TMP/body" | grep -qE 'name="birth_date"\s+value="1990-05-17"'; ok "carga la fecha de nacimiento" $?
+grep -qF '<option value="editor" selected>Editor</option>' "$TMP/body" && [ "$(grep -c ' selected' "$TMP/body")" = 1 ]; ok "carga el rol (solo «Editor» seleccionado)" $?
+TOKEN_M3=$(grep -oE 'name="row_token" value="[0-9a-f]{64}"' "$TMP/body" | grep -oE '[0-9a-f]{64}')
+sql "INSERT INTO users (name, last_name, email) VALUES ('Antiguo', 'Sin Campos', 'smoke-m3-old@example.com');" >/dev/null
+UOLD=$(id_of smoke-m3-old@example.com)
+[ "$(sql "SELECT CONCAT(IFNULL(document,'NULL'),'|',IFNULL(birth_date,'NULL'),'|',role) FROM users WHERE id=$UOLD;")" = "NULL|NULL|user" ]; ok "una fila creada SIN los campos nuevos (como las de antes de la migración) queda NULL|NULL|user" $?
+chk "editar al usuario antiguo" 200 "$BASE/edit.php?id=$UOLD"
+tr -d '\n' < "$TMP/body" | grep -qE 'name="document"\s+value=""' && tr -d '\n' < "$TMP/body" | grep -qE 'name="birth_date"\s+value=""' && grep -qF '<option value="user" selected>Usuario</option>' "$TMP/body"; ok "...se abre con documento y fecha vacíos y el rol «Usuario»" $?
+chk "guardar al antiguo sin tocar nada nuevo" 302 -H "Origin: $ORIGIN" -d "id=$UOLD&name=Antiguo&last_name=Sin+Campos&email=smoke-m3-old@example.com&phone=&document=&birth_date=&role=user" "$BASE/edit.php"
+[ "$(sql "SELECT CONCAT(IFNULL(document,'NULL'),'|',IFNULL(birth_date,'NULL')) FROM users WHERE id=$UOLD;")" = "NULL|NULL" ]; ok "...y siguen en NULL" $?
+chk "ponerle a otro un documento que ya existe" 409 -H "Origin: $ORIGIN" -d "id=$UOLD&name=Antiguo&last_name=Sin+Campos&email=smoke-m3-old@example.com&document=ab-12345&role=user" "$BASE/edit.php"
+grep -qF 'Ya existe otro usuario registrado con ese documento.' "$TMP/body"; ok "...con el aviso del documento" $?
+chk "guardar a A conservando SU PROPIO documento (no choca consigo mismo)" 302 -H "Origin: $ORIGIN" -d "id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&document=AB-12345&birth_date=1990-05-17&role=editor" "$BASE/edit.php"
+chk "cambiar el rol de A a admin" 302 -H "Origin: $ORIGIN" -d "id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&document=AB-12345&birth_date=1990-05-17&role=admin" "$BASE/edit.php"
+[ "$(sql "SELECT role FROM users WHERE id=$UA;")" = admin ]; ok "el rol cambió en la BD" $?
+chk "rol manipulado al editar" 422 -H "Origin: $ORIGIN" -d "id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&role=root" "$BASE/edit.php"
+[ "$(sql "SELECT role FROM users WHERE id=$UA;")" = admin ]; ok "...y el rol guardado no cambió" $?
+chk "quitar documento y fecha a A" 302 -H "Origin: $ORIGIN" -d "id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&document=&birth_date=&role=admin" "$BASE/edit.php"
+[ "$(sql "SELECT CONCAT(IFNULL(document,'NULL'),'|',IFNULL(birth_date,'NULL')) FROM users WHERE id=$UA;")" = "NULL|NULL" ]; ok "vaciarlos los deja en NULL" $?
+chk "A guarda con la huella VIEJA tras cambiar solo el rol (el rol cuenta en la huella)" 409 -H "Origin: $ORIGIN" -d "id=$UA&row_token=$TOKEN_M3&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&role=user" "$BASE/edit.php"
+chk "fecha inválida al editar" 422 -H "Origin: $ORIGIN" -d "id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&birth_date=2023-02-30&role=admin" "$BASE/edit.php"
+tr -d '\n' < "$TMP/body" | grep -qE 'name="birth_date"\s+value="2023-02-30"'; ok "...y conserva lo escrito" $?
 
 section "Eliminar (delete.php)"
 chk "GET (no borra)" 405 "$BASE/delete.php?id=$U1"
@@ -318,7 +394,7 @@ chk "borrar al usuario con apóstrofe, con Origin en mayúsculas" 302 -H "Origin
 
 if [ "$WITH_DB_STOP" = 1 ]; then
     section "Base de datos detenida (503)"
-    chk "se crea un usuario para la prueba" 302 -H "Origin: $ORIGIN" -d "name=Smoke&last_name=Dos&email=smoke-two@example.com" "$BASE/create.php"
+    chk "se crea un usuario para la prueba" 302 -H "Origin: $ORIGIN" -d "role=user&name=Smoke&last_name=Dos&email=smoke-two@example.com" "$BASE/create.php"
     U2=$(id_of smoke-two@example.com)
     docker compose stop db >/dev/null 2>&1
     chk "GET /" 503 "$BASE/"
@@ -326,9 +402,9 @@ if [ "$WITH_DB_STOP" = 1 ]; then
     chk "GET /?page=2 (una página)" 503 "$BASE/?page=2"
     chk "GET /?q=zoe&page=3 (búsqueda y página)" 503 --get --data-urlencode "q=zoe" --data-urlencode "page=3" "$BASE/"
     chk "GET create.php" 200 "$BASE/create.php"
-    chk "POST create.php" 503 -H "Origin: $ORIGIN" -d "name=Ana&last_name=Ruiz&email=smoke-y@example.com" "$BASE/create.php"
+    chk "POST create.php" 503 -H "Origin: $ORIGIN" -d "role=user&name=Ana&last_name=Ruiz&email=smoke-y@example.com" "$BASE/create.php"
     chk "GET edit.php" 503 "$BASE/edit.php?id=$U2"
-    chk "POST edit.php" 503 -H "Origin: $ORIGIN" -d "id=$U2&name=Ana&last_name=Ruiz&email=smoke-y@example.com" "$BASE/edit.php"
+    chk "POST edit.php" 503 -H "Origin: $ORIGIN" -d "role=user&id=$U2&name=Ana&last_name=Ruiz&email=smoke-y@example.com" "$BASE/edit.php"
     grep -q 'value="Ana"' "$TMP/body"; ok "edit.php conserva lo que escribió el usuario" $?
     chk "POST delete.php con origen correcto" 503 -H "Origin: $ORIGIN" -d "id=$U2" "$BASE/delete.php"
     chk "POST delete.php con origen ajeno (se comprueba antes que la BD)" 403 -H "Origin: http://evil.example" -d "id=$U2" "$BASE/delete.php"
@@ -343,7 +419,7 @@ if [ "$WITH_DB_STOP" = 1 ]; then
     sql "RENAME TABLE users TO users_tmp;" >/dev/null
     chk "GET /" 500 "$BASE/"
     grep -q 'No se pudieron obtener los usuarios' "$TMP/body"; ok "el listado dice qué falló, sin detalles" $?
-    chk "POST create.php" 500 -H "Origin: $ORIGIN" -d "name=Ana&last_name=Ruiz&email=smoke-q@example.com" "$BASE/create.php"
+    chk "POST create.php" 500 -H "Origin: $ORIGIN" -d "role=user&name=Ana&last_name=Ruiz&email=smoke-q@example.com" "$BASE/create.php"
     grep -q 'No se pudo guardar el usuario' "$TMP/body"; ok "crear: aviso propio de la página" $?
     chk "GET edit.php?id=1" 500 "$BASE/edit.php?id=1"
     grep -q 'No se pudo completar la operación' "$TMP/body"; ok "editar: aviso propio de la página" $?

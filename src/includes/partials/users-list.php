@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Lista de usuarios.
  *
  * @var string|null $errorMessage
- * @var array<int, array{id: int|string, name: string, last_name: string, email: string, phone: ?string, created_at: string}> $users
+ * @var array<int, array{id: int|string, name: string, last_name: string, email: string, phone: ?string, document: ?string, birth_date: ?string, role: string, created_at: string}> $users
  * @var string $search Término buscado ya limpio ('' si no hay búsqueda); parse_search_term() en user-search.php.
  * @var array{page: int, pages: int, perPage: int, offset: int, total: int, from: int, to: int} $pagination Resultado de paginate().
  */
@@ -28,7 +28,7 @@ declare(strict_types=1);
     <form method="get" action="index.php" role="search" class="mb-4">
         <label for="q" class="visually-hidden">Buscar usuarios</label>
         <div class="d-flex align-items-center gap-2">
-            <input type="search" id="q" name="q" class="form-control" value="<?= escape($search) ?>" maxlength="<?= SEARCH_TERM_MAX ?>" placeholder="Buscar por nombre, apellido, correo o teléfono" autocomplete="off">
+            <input type="search" id="q" name="q" class="form-control" value="<?= escape($search) ?>" maxlength="<?= SEARCH_TERM_MAX ?>" placeholder="Buscar por nombre, apellido, correo, teléfono o documento" autocomplete="off">
             <button type="submit" class="btn-solid theme-primary">Buscar</button>
             <?php if ($search !== ''): ?>
                 <a class="btn-outline" href="index.php" role="button">Limpiar búsqueda</a>
@@ -69,6 +69,9 @@ declare(strict_types=1);
             <th>Apellido</th>
             <th>Email</th>
             <th>Teléfono</th>
+            <th>Documento</th>
+            <th>Nacimiento</th>
+            <th>Rol</th>
             <th>Fecha de Creación</th>
             <th aria-label="Acciones"></th>
         </tr>
@@ -80,6 +83,10 @@ declare(strict_types=1);
                 <td><?= escape($user['last_name']) ?></td>
                 <td><?= escape($user['email']) ?></td>
                 <td><?= escape($user['phone'] ?? "-") ?></td>
+                <td><?= escape($user['document'] ?? "-") ?></td>
+                <td><?= escape($user['birth_date'] ?? "-") ?></td>
+                <?php /* El rol viene de la BD (ENUM): se muestra su etiqueta, o la clave si algún día no estuviera en la lista. */ ?>
+                <td><?= escape(user_roles()[$user['role']] ?? $user['role']) ?></td>
                 <td><?= escape(format_utc_datetime((string) $user['created_at'])) ?></td>
                 <td>
                     <?php $fullName = $user['name'] . ' ' . $user['last_name']; ?>

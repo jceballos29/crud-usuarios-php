@@ -102,19 +102,20 @@ foreach (['', 'localhost:8080', 'ftp://x', 'null'] as $badConfig) {
 section('user_fields(): definición de los campos del formulario');
 same('el teléfono usa type="tel" (teclado numérico en el móvil)', 'tel', user_fields()['phone']['type']);
 same('el correo usa type="email"', 'email', user_fields()['email']['type']);
-same('los máximos coinciden con las columnas', [100, 100, 254, 20], array_column(user_fields(), 'max'));
+same('los máximos coinciden con las columnas', [100, 100, 254, 20, 20, 10, 0], array_column(user_fields(), 'max'));
 
 section('user_row_token(): huella de la fila para detectar ediciones simultáneas');
-$row = ['name' => 'Ana', 'last_name' => 'Ruiz', 'email' => 'a@b.co', 'phone' => null];
+$row = ['name' => 'Ana', 'last_name' => 'Ruiz', 'email' => 'a@b.co', 'phone' => null, 'document' => null, 'birth_date' => null, 'role' => 'user'];
 $token = user_row_token($row);
 same('es un sha256 en hexadecimal', 1, preg_match('/^[0-9a-f]{64}$/', $token));
 same('es determinista', $token, user_row_token($row));
-same('no depende del orden de las claves', $token, user_row_token(['phone' => null, 'email' => 'a@b.co', 'last_name' => 'Ruiz', 'name' => 'Ana']));
-foreach (['name' => 'Anita', 'last_name' => 'Ruiz2', 'email' => 'x@b.co', 'phone' => '3001234567'] as $column => $other) {
+same('no depende del orden de las claves', $token, user_row_token(['role' => 'user', 'birth_date' => null, 'document' => null, 'phone' => null, 'email' => 'a@b.co', 'last_name' => 'Ruiz', 'name' => 'Ana']));
+foreach (['name' => 'Anita', 'last_name' => 'Ruiz2', 'email' => 'x@b.co', 'phone' => '3001234567', 'document' => 'AB123', 'birth_date' => '1990-01-01', 'role' => 'admin'] as $column => $other) {
     same("cambia si cambia $column", true, $token !== user_row_token([$column => $other] + $row));
 }
 same('cambia con solo una mayúscula (la comparación SQL no lo vería)', true, $token !== user_row_token(['name' => 'ana'] + $row));
 same('phone NULL y phone vacío son distintos', true, $token !== user_row_token(['phone' => ''] + $row));
+same('document NULL y document vacío son distintos', true, $token !== user_row_token(['document' => ''] + $row));
 
 section('read_user_input(): limpia la entrada cruda');
 $fields = user_fields();
@@ -122,7 +123,7 @@ $data = read_user_input(['name' => '  Ana  ', 'last_name' => 'Ruiz', 'email' => 
 same('trim del nombre', 'Ana', $data['name']);
 same('el correo se pasa a minúsculas', 'ana@ejemplo.com', $data['email']);
 same('trim del teléfono', '300', $data['phone']);
-same('solo quedan las claves definidas', ['name', 'last_name', 'email', 'phone'], array_keys($data));
+same('solo quedan las claves definidas', ['name', 'last_name', 'email', 'phone', 'document', 'birth_date', 'role'], array_keys($data));
 $data = read_user_input(['name' => ['x'], 'last_name' => null, 'email' => 5], $fields);
 same('un arreglo (name[]=x) se trata como vacío', '', $data['name']);
 same('null se trata como vacío', '', $data['last_name']);
@@ -211,7 +212,7 @@ same('sin búsqueda: ni condición ni parámetros', ['', []], user_search_where(
 same('recuento sin búsqueda', ['SELECT COUNT(*) FROM users', []], user_count_query(''));
 [$countSql, $countParams] = user_count_query('laura');
 preg_match_all('/:q\d+/', $countSql, $countMarkers);
-same('recuento con búsqueda: 5 marcadores distintos', [5, 5], [count($countMarkers[0]), count(array_unique($countMarkers[0]))]);
+same('recuento con búsqueda: 6 marcadores distintos', [6, 6], [count($countMarkers[0]), count(array_unique($countMarkers[0]))]);
 same('el recuento empieza por SELECT COUNT(*) y lleva el WHERE', true, str_starts_with($countSql, 'SELECT COUNT(*) FROM users WHERE '));
 same('el recuento no lleva ORDER BY ni LIMIT (no hacen falta para contar)', false, str_contains($countSql, 'ORDER BY') || str_contains($countSql, 'LIMIT'));
 
@@ -223,10 +224,10 @@ same('ordena por id descendente y pagina', true, str_ends_with($allSql, 'ORDER B
 same('LIMIT y OFFSET son enteros de PHP (bind_all los enlaza con PARAM_INT)', [true, true], [is_int($allParams[':limit']), is_int($allParams[':offset'])]);
 [$sql, $params] = user_list_query('laura', 10, 20);
 preg_match_all('/:q\d+/', $sql, $matches);
-same('con búsqueda: 5 marcadores de columna', 5, count($matches[0]));
+same('con búsqueda: 6 marcadores de columna', 6, count($matches[0]));
 same('con búsqueda: NINGÚN marcador repetido (si no, HY093 con prepares reales)', count($matches[0]), count(array_unique($matches[0])));
 same('los parámetros son exactamente esos marcadores más :limit y :offset', [...array_unique($matches[0]), ':limit', ':offset'], array_keys($params));
-same('los 5 de la búsqueda reciben el mismo patrón', ['%laura%'], array_values(array_unique(array_slice($params, 0, 5))));
+same('los 5 de la búsqueda reciben el mismo patrón', ['%laura%'], array_values(array_unique(array_slice($params, 0, 6))));
 same('LIMIT y OFFSET llegan tal cual', [10, 20], [$params[':limit'], $params[':offset']]);
 same('busca en el nombre completo ("Laura Gómez")', true, str_contains($sql, "CONCAT(name, ' ', last_name) LIKE"));
 same('busca en el correo y en el teléfono', true, str_contains($sql, 'email LIKE') && str_contains($sql, 'phone LIKE'));
@@ -237,7 +238,7 @@ same('OFFSET negativo se corrige a 0', 0, $negParams[':offset']);
 same('LIMIT negativo se corrige a 1', 1, $negParams2[':limit']);
 [$listSql] = user_list_query('x', 10, 0);
 [$countSqlX] = user_count_query('x');
-same('el listado y el recuento comparten exactamente el mismo WHERE', substr($countSqlX, strlen('SELECT COUNT(*) FROM users')), substr($listSql, strlen('SELECT id, name, last_name, email, phone, created_at FROM users'), strpos($listSql, ' ORDER BY') - strlen('SELECT id, name, last_name, email, phone, created_at FROM users')));
+same('el listado y el recuento comparten exactamente el mismo WHERE', substr($countSqlX, strlen('SELECT COUNT(*) FROM users')), substr($listSql, strlen('SELECT id, name, last_name, email, phone, document, birth_date, role, created_at FROM users'), strpos($listSql, ' ORDER BY') - strlen('SELECT id, name, last_name, email, phone, document, birth_date, role, created_at FROM users')));
 $hostile = "'; DROP TABLE users; --";
 [$hostileSql, $hostileParams] = user_list_query($hostile, 10, 0);
 same('un texto hostil no aparece en el SQL', false, str_contains($hostileSql, 'DROP') || str_contains($hostileSql, '--'));
@@ -341,5 +342,81 @@ foreach (['laura', 'laura gomez', 'a&b=c#x', 'Gómez', '100%', "O'Brien", '<scri
     parse_str((string) parse_url(list_url($term, 4), PHP_URL_QUERY), $back);
     same("ida y vuelta de «{$term}»", ['q' => $term, 'page' => '4'], $back);
 }
+
+function validWith(array $extra): array
+{
+    $fields = user_fields();
+    $data = read_user_input($extra + ['name' => 'Ana', 'last_name' => 'Perez', 'email' => 'a@b.co', 'role' => 'user'], $fields);
+
+    return validate_user($data, $fields, new DateTimeImmutable('2026-11-19', new DateTimeZone('UTC')));
+}
+
+section('Mejora 3: un usuario con los campos nuevos vacíos sigue siendo válido (salvo el rol)');
+same('document y birth_date son opcionales', [], validWith([]));
+same('sin rol: error (un envío sin rol no se convierte en rol por sorpresa)', ['role' => 'Selecciona un rol de la lista.'], validate_user(read_user_input(['name' => 'Ana', 'last_name' => 'Perez', 'email' => 'a@b.co'], user_fields()), user_fields()));
+same('un formulario NUEVO sí trae el rol por defecto', USER_ROLE_DEFAULT, empty_user_data(user_fields())['role']);
+same('...y los demás campos nuevos vacíos', ['', ''], [empty_user_data(user_fields())['document'], empty_user_data(user_fields())['birth_date']]);
+
+section('Rol: lista blanca estricta');
+foreach (array_keys(user_roles()) as $role) {
+    same("«{$role}» es válido", [], validWith(['role' => $role]));
+}
+foreach (['superadmin', 'ADMIN', 'Admin', '', '0', '1', 'user,admin', "ad\0min", 'usuario', 'null'] as $role) {
+    same('rol ' . var_export($role, true) . ' se rechaza', ['role' => 'Selecciona un rol de la lista.'], validWith(['role' => $role]));
+}
+same('con espacios alrededor se acepta (trim, como todos los campos)', [], validWith(['role' => ' admin ']));
+same('role[] (un arreglo) se rechaza', ['role' => 'Selecciona un rol de la lista.'], validate_user(read_user_input(['name' => 'Ana', 'last_name' => 'P', 'email' => 'a@b.co', 'role' => ['admin']], user_fields()), user_fields()));
+same('los roles son los del ENUM (lista fija y en orden)', ['user', 'editor', 'admin'], array_keys(user_roles()));
+same('el rol por defecto es uno de ellos', true, array_key_exists(USER_ROLE_DEFAULT, user_roles()));
+
+section('Documento: opcional, texto, mayúsculas, único en la BD');
+same('vacío es válido', [], validWith(['document' => '']));
+foreach (['12345', '1234567890', 'AB-123456', 'ab-123456', '00012345', 'X1234567Z', str_repeat('9', 20)] as $doc) {
+    same("«{$doc}» es válido", [], validWith(['document' => $doc]));
+}
+foreach (['1234', 'ab', '-12345', '123 456', '123.456', '12_345', '12345;', "12345\n6", 'ÁÉ1234', '٣٣٣٣٣٣'] as $doc) {
+    same('«' . addcslashes($doc, "\n") . '» se rechaza', true, isset(validWith(['document' => $doc])['document']));
+}
+same('21 caracteres: demasiado largo', 'El documento no debe superar los 20 caracteres.', validWith(['document' => str_repeat('9', 21)])['document']);
+same('se guarda en mayúsculas', 'AB-123456', read_user_input(['document' => ' ab-123456 '], user_fields())['document']);
+same('los ceros a la izquierda se conservan (es texto)', '00012345', read_user_input(['document' => '00012345'], user_fields())['document']);
+
+section('Fecha de nacimiento: AAAA-MM-DD, real, ni futura ni anterior a 1900');
+same('vacía es válida', [], validWith(['birth_date' => '']));
+foreach (['1990-05-17', '2000-02-29', '1900-01-01', '2026-11-19', '2026-11-18'] as $d) {
+    same("$d es válida", [], validWith(['birth_date' => $d]));
+}
+foreach (['2023-02-29' => 'no existe', '2026-02-30' => 'no existe', '1999-13-01' => 'no existe', '1999-00-10' => 'no existe', '1999-12-32' => 'no existe', '1900-02-29' => '1900 no fue bisiesto'] as $d => $why) {
+    same("$d se rechaza ($why)", 'Ingresa una fecha válida con el formato AAAA-MM-DD.', validWith(['birth_date' => $d])['birth_date'] ?? null);
+}
+foreach (['17/05/1990', '1990-5-7', '90-05-17', '1990/05/17', '19900517', 'ayer', '1990-05-17 10:00', '1990-05-17T10:00', '+1990-05-17', '1990-05-17x', '１９９０-05-17', '0000-00-00'] as $d) {
+    same("«{$d}» se rechaza por formato", 'Ingresa una fecha válida con el formato AAAA-MM-DD.', validWith(['birth_date' => $d])['birth_date'] ?? null);
+}
+same('mañana es futura', 'La fecha de nacimiento no puede ser futura.', validWith(['birth_date' => '2026-11-20'])['birth_date'] ?? null);
+same('el año 9999 es futuro', 'La fecha de nacimiento no puede ser futura.', validWith(['birth_date' => '9999-12-31'])['birth_date'] ?? null);
+same('1899-12-31 es anterior a 1900', 'La fecha de nacimiento no puede ser anterior al 1 de enero de 1900.', validWith(['birth_date' => '1899-12-31'])['birth_date'] ?? null);
+same('0001-01-01 es anterior a 1900', 'La fecha de nacimiento no puede ser anterior al 1 de enero de 1900.', validWith(['birth_date' => '0001-01-01'])['birth_date'] ?? null);
+same('sin pasar "hoy", se usa la fecha real (la de ayer es válida y la de mañana no)', [[], true], (function (): array {
+    $fields = user_fields();
+    $utc = new DateTimeZone('UTC');
+    $check = static fn(string $when): array => validate_user(read_user_input(['name' => 'Ana', 'last_name' => 'P', 'email' => 'a@b.co', 'role' => 'user', 'birth_date' => (new DateTimeImmutable($when, $utc))->format('Y-m-d')], $fields), $fields);
+
+    return [$check('yesterday'), isset($check('tomorrow')['birth_date'])];
+})());
+
+section('user_db_params(): lo opcional vacío es NULL, nunca ""');
+$params = user_db_params(read_user_input(['name' => 'Ana', 'last_name' => 'P', 'email' => 'A@B.co', 'role' => 'editor'], user_fields()));
+same('phone, document y birth_date vacíos van como NULL', [null, null, null], [$params[':phone'], $params[':document'], $params[':birth_date']]);
+same('el rol y el correo normalizado pasan', ['editor', 'a@b.co'], [$params[':role'], $params[':email']]);
+same('los marcadores son los del INSERT/UPDATE', [':name', ':last_name', ':email', ':phone', ':document', ':birth_date', ':role'], array_keys($params));
+$full = user_db_params(read_user_input(['name' => 'Ana', 'last_name' => 'P', 'email' => 'a@b.co', 'role' => 'admin', 'document' => 'ab12345', 'birth_date' => '1990-05-17', 'phone' => '3001234567'], user_fields()));
+same('con valores, van tal cual (documento en mayúsculas)', ['3001234567', 'AB12345', '1990-05-17'], [$full[':phone'], $full[':document'], $full[':birth_date']]);
+
+section('duplicate_user_field(): qué UNIQUE chocó, según el mensaje de MySQL');
+same('correo', 'email', duplicate_user_field("Duplicate entry 'a@b.co' for key 'users.unique_email'"));
+same('documento', 'document', duplicate_user_field("Duplicate entry 'AB12345' for key 'users.unique_document'"));
+same('sin el prefijo de tabla (MySQL 5.7 / MariaDB)', 'document', duplicate_user_field("Duplicate entry 'x' for key 'unique_document'"));
+same('una clave desconocida', null, duplicate_user_field("Duplicate entry '3' for key 'users.PRIMARY'"));
+same('un mensaje que no es de duplicado', null, duplicate_user_field('Connection refused'));
 
 finish();

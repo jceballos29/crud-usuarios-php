@@ -22,7 +22,8 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | MVP 7. Revisión | Hecho (etiqueta `v1-crud-base`) |
 | Mejora 1. Búsqueda y filtros | Hecha (rama `mejora-1-busqueda`) |
 | Mejora 2. Paginación | Hecha (rama `mejora-2-paginacion`) |
-| Mejoras 3 a 8 | Pendientes |
+| Mejora 3. Más campos (documento, nacimiento, rol) | Hecha (rama `mejora-3-mas-campos`) |
+| Mejoras 4 a 8 | Pendientes |
 
 ## Qué se construye
 
@@ -117,10 +118,11 @@ docker compose ps        # los 4 servicios en running; db en healthy
 
 ## Pruebas
 
-Hay tres niveles y no necesitan instalar nada más que lo que ya usa el proyecto:
+Hay cuatro niveles y no necesitan instalar nada más que lo que ya usa el proyecto:
 
 - **Unitarias** (`src/tests/unit.php`): las funciones puras (validación, id, origen, fechas, escape, búsqueda, paginación). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
 - **De integración** (`src/tests/integration.php`): las consultas de búsqueda y paginación contra MySQL, sobre una tabla temporal que no toca tus datos. `docker compose exec php php tests/integration.php`.
+- **De la migración** (`tests/migration-001.sh`): aplica `database/migrations/001-more-fields.sql` a una BD temporal con el esquema anterior y comprueba que acaba igual que una instalación nueva. Usa root y borra sus bases temporales.
 - **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, origen en los tres POST, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
 
 Ambos terminan con código 0 si todo pasa y con 1 si algo falla, así que sirven también para automatizarlos. Si cambias el puerto o el origen, usa `BASE_URL` y `ORIGIN`.
@@ -135,9 +137,11 @@ crud-usuarios-docker/
 ├── .env / .env.example      # Variables (.env no se sube a git)
 ├── docker/                  # Dockerfile de PHP, php.ini (seguro), php.local.ini (solo desarrollo), xdebug.ini, nginx (cabeceras y CSP)
 ├── tests/
-│   └── smoke.sh             # Pruebas de punta a punta con curl
+│   ├── smoke.sh             # Pruebas de punta a punta con curl
+│   └── migration-001.sh     # Prueba de la migración 001 con bases temporales
 ├── database/
-│   ├── 01-schema.sql        # Tabla users
+│   ├── 01-schema.sql        # Tabla users (instalación nueva)
+│   ├── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql)
 │   └── 02-seed.sql          # SET NAMES utf8mb4 + 3 usuarios de prueba
 └── src/                     # Montado en /var/www/html
     ├── public/              # Raíz web: lo único que ve el navegador
@@ -206,6 +210,16 @@ El listado muestra 10 usuarios por página: `index.php?page=2` (y `index.php?q=l
 - **Rendimiento (medido con 200.000 usuarios):** una página lejana (`OFFSET 190000`) cuesta ~60 ms, y un `COUNT(*)` ~23 ms sin búsqueda o ~230 ms con ella. La paginación por clave (`WHERE id < :último`) sería ~0,3 ms siempre, pero no permite saltar a una página ni numerarlas.
 - **`LIMIT` y `OFFSET`** se enlazan con `PDO::PARAM_INT` (`bind_all()`): con consultas nativas MySQL perdona un texto, con emuladas no.
 - **Datos de demostración:** `docker compose exec php php scripts/seed-demo.php 35` crea 35 usuarios `demo-NNN@example.com`; `--clean` los borra.
+
+## Documento, fecha de nacimiento y rol
+
+Cada usuario tiene tres campos más (mejora 3): `document`, `birth_date` y `role`.
+
+- **Documento:** opcional y **único**. Es texto (conserva ceros a la izquierda), se guarda en **mayúsculas**, de 5 a 20 caracteres (letras, números y guiones). Dos usuarios no pueden tener el mismo; varios sin documento sí (se guarda `NULL`). Se busca también desde el buscador.
+- **Fecha de nacimiento:** opcional, `AAAA-MM-DD`, una fecha que exista, no futura y no anterior a 1900.
+- **Rol:** obligatorio, uno de `user` (Usuario, el valor por defecto), `editor` o `admin`. Solo una **etiqueta**: no da ningún permiso hasta el inicio de sesión (mejora 5). La lista válida está en `user_roles()` y debe coincidir con el `ENUM` de la BD (una prueba de integración lo comprueba).
+- **Migración:** una BD que ya tiene datos recibe las columnas con `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/migrations/001-more-fields.sql`. Se aplica **una sola vez** (la segunda falla sin cambiar nada). Los usuarios existentes quedan con documento y fecha vacíos y rol `user`. Una instalación nueva ya trae las columnas por `01-schema.sql`: hay que mantener las dos cosas a la vez.
+- **Los envíos sin `role`** (por ejemplo con `curl`, como antes de esta mejora) responden 422.
 
 ## Ediciones simultáneas
 

@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Formulario de usuario compartido (create.php y edit.php), con los avisos de error.
  * Variables esperadas (las define la página antes del require):
  *
- * @var array<string, array{label: string, type: string, required: bool, max: int}> $fields Definición de campos (user_fields()).
+ * @var array<string, array{label: string, type: string, required: bool, max: int, options?: array<string, string>}> $fields Definición de campos (user_fields()).
  * @var array<string, string> $data Valores a pintar en cada campo.
  * @var array<string, string> $errors Errores por campo (campo => mensaje).
  * @var string|null $errorMessage Error general (BD, configuración...), o null.
@@ -43,17 +43,36 @@ declare(strict_types=1);
         <?php $hasError = isset($errors[$fieldName]); ?>
         <div class="form-field mb-3">
             <label for="<?= escape($fieldName) ?>" class="form-label"><?= escape($definition['label']) ?></label>
-            <input
-                type="<?= escape($definition['type']) ?>"
-                class="form-control<?= $hasError ? ' is-invalid' : '' ?>"
-                id="<?= escape($fieldName) ?>"
-                name="<?= escape($fieldName) ?>"
-                value="<?= escape($data[$fieldName]) ?>"
-                maxlength="<?= escape($definition['max']) ?>"
-                <?php /* Son datos de OTRA persona: autocomplete="off" evita que el navegador rellene los del propio usuario. */ ?>
-                autocomplete="off"
-                <?= $definition['required'] ? 'required' : '' ?>
-                <?php if ($hasError): ?>aria-invalid="true" aria-describedby="<?= escape($fieldName) ?>-error" <?php endif; ?>>
+            <?php if ($definition['type'] === 'select'): ?>
+                <?php /* Las opciones salen de la lista blanca del servidor; lo que llegue de vuelta se vuelve a validar. */ ?>
+                <select
+                    class="form-select<?= $hasError ? ' is-invalid' : '' ?>"
+                    id="<?= escape($fieldName) ?>"
+                    name="<?= escape($fieldName) ?>"
+                    autocomplete="off"
+                    <?= $definition['required'] ? 'required' : '' ?>
+                    <?php if ($hasError): ?>aria-invalid="true" aria-describedby="<?= escape($fieldName) ?>-error" <?php endif; ?>>
+                    <?php /* Un valor que no está en la lista (envío manipulado) no se pinta: queda sin seleccionar. */ ?>
+                    <?php if (!array_key_exists($data[$fieldName], $definition['options'])): ?>
+                        <option value="" selected disabled>Selecciona…</option>
+                    <?php endif; ?>
+                    <?php foreach ($definition['options'] as $optionValue => $optionLabel): ?>
+                        <option value="<?= escape($optionValue) ?>"<?= (string) $optionValue === $data[$fieldName] ? ' selected' : '' ?>><?= escape($optionLabel) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            <?php else: ?>
+                <input
+                    type="<?= escape($definition['type']) ?>"
+                    class="form-control<?= $hasError ? ' is-invalid' : '' ?>"
+                    id="<?= escape($fieldName) ?>"
+                    name="<?= escape($fieldName) ?>"
+                    value="<?= escape($data[$fieldName]) ?>"
+                    <?php if ($definition['type'] !== 'date'): ?>maxlength="<?= escape($definition['max']) ?>"<?php endif; ?>
+                    <?php /* Son datos de OTRA persona: autocomplete="off" evita que el navegador rellene los del propio usuario. */ ?>
+                    autocomplete="off"
+                    <?= $definition['required'] ? 'required' : '' ?>
+                    <?php if ($hasError): ?>aria-invalid="true" aria-describedby="<?= escape($fieldName) ?>-error" <?php endif; ?>>
+            <?php endif; ?>
             <?php if ($hasError): ?>
                 <div class="invalid-feedback" id="<?= escape($fieldName) ?>-error"><?= escape($errors[$fieldName]) ?></div>
             <?php endif; ?>

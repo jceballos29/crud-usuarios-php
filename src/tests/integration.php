@@ -15,6 +15,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/../includes/connection.php';
+require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
 require_once __DIR__ . '/harness.php';
@@ -41,6 +42,7 @@ $rows[] = ['Zoé', 'Núñez', 'itest-zoe@example.com', '3105551234'];
 foreach ($rows as [$name, $last, $email, $phone]) {
     $insert->execute([':n' => $name, ':l' => $last, ':e' => $email, ':p' => $phone]);
 }
+$pdo->exec("UPDATE users SET document = 'ZX-998877' WHERE email = 'itest-zoe@example.com'");
 $total = count($rows); // 31
 
 /**
@@ -153,6 +155,19 @@ same('«nunez» por apellido', ['Zoé'], $literal('nunez'));
 same('«zoé núñez» con tildes también', ['Zoé'], $literal('zoé núñez'));
 same('un trozo del teléfono', ['Zoé'], $literal('555123'));
 same('una parte del correo', ['Zoé'], $literal('itest-zoe'));
+
+section('Mejora 3: la lista de roles de PHP y el ENUM de la BD son la misma');
+$enum = (string) $pdo->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'")->fetchColumn();
+preg_match_all("/'([^']+)'/", $enum, $enumValues);
+same('user_roles() tiene exactamente los valores del ENUM, en el mismo orden', $enumValues[1], array_keys(user_roles()));
+$default = (string) $pdo->query("SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'")->fetchColumn();
+same('USER_ROLE_DEFAULT es el DEFAULT de la columna', $default, USER_ROLE_DEFAULT);
+$lengths = $pdo->query("SELECT COLUMN_NAME, CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME IN ('document', 'phone')")->fetchAll(PDO::FETCH_KEY_PAIR);
+same('los máximos de user_fields() coinciden con las columnas (document, phone)', [(int) $lengths['document'], (int) $lengths['phone']], [user_fields()['document']['max'], user_fields()['phone']['max']]);
+
+section('Mejora 3: la búsqueda también encuentra por documento');
+same('«zx-9988» (minúsculas, a medias) encuentra a Zoé', ['Zoé'], $literal('zx-9988'));
+same('un documento que no existe no encuentra a nadie', [], $literal('QQ-000000'));
 
 section('Un texto hostil se trata como texto');
 foreach (["' OR '1'='1", "'; DROP TABLE users; --", '" OR 1=1 --', '%\' OR \'x\' LIKE \'%'] as $hostile) {
