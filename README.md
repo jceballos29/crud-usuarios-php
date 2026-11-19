@@ -31,12 +31,16 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 
 ## Qué se construye
 
-| Operación | SQL | Archivo |
-|-----------|-----|---------|
+| Operación | SQL | Página |
+|-----------|-----|--------|
 | Create | `INSERT` | `create.php` |
-| Read | `SELECT` | `index.php` |
+| Read | `SELECT` (con búsqueda y paginación) | `index.php` |
 | Update | `UPDATE` | `edit.php` |
-| Delete | `DELETE` | `delete.php` |
+| Delete | `UPDATE ... SET active = 0` (borrado lógico) | `delete.php` |
+| Restore | `UPDATE ... SET active = 1` | `restore.php` |
+| Acceso | `SELECT` en `admins`; sesión y token CSRF | `login.php`, `logout.php` |
+
+Todas exigen haber iniciado sesión salvo `login.php`. El SQL vive solo en los repositorios (ver «Arquitectura»).
 
 Tabla `users` (`database/01-schema.sql`):
 
@@ -46,13 +50,19 @@ Tabla `users` (`database/01-schema.sql`):
 | `name`, `last_name` | `VARCHAR(100)` | obligatorios |
 | `email` | `VARCHAR(254)` | obligatorio, **único** |
 | `phone` | `VARCHAR(20)` | opcional (`NULL`) |
-| `created_at` | `TIMESTAMP` | `DEFAULT CURRENT_TIMESTAMP` |
+| `document` | `VARCHAR(20)` | opcional, **único** (varios `NULL` conviven) |
+| `birth_date` | `DATE` | opcional |
+| `role` | `ENUM('user','editor','admin')` | obligatorio, por defecto `user` |
+| `active` | `TINYINT(1)` | 1 = visible, 0 = eliminado (borrado lógico); índice `(active, id)` |
+| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP`, en UTC |
+
+Tabla `admins` (quienes inician sesión): `id`, `email` único, `password_hash` (bcrypt) y `created_at`. Los cambios de esquema posteriores a la primera instalación están en `database/migrations/`.
 
 ## Convenciones
 
 - Código, tablas y nombres de archivo en **inglés**; textos para el usuario en **español**.
 - `declare(strict_types=1);` en todos los archivos PHP.
-- Toda salida a HTML pasa por `escape()` (`escape()`, en `src/app/support.php`).
+- Toda salida a HTML pasa por `escape()` (`src/app/support.php`); lo comprueba `src/tests/architecture.php`.
 - Credenciales **solo** por variables de entorno (`.env`), nunca en el código.
 - Lo que no debe ser accesible por URL vive fuera de `src/public/`.
 
@@ -116,7 +126,9 @@ docker compose ps        # los 4 servicios en running; db en healthy
 | Shell en PHP | `docker compose exec php sh` |
 | Comprobar conexión a MySQL | `docker compose exec php php scripts/db-check.php` |
 | Comando en PHP **como usuario de migraciones** (crear administradores, datos de demostración, pruebas de integración) | `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com` |
+| Todas las pruebas | `tests/run-all.sh` (`--with-db-stop` para incluir los 503) |
 | Pruebas unitarias (sin BD) | `docker compose exec php php tests/unit.php` |
+| Pruebas de arquitectura | `docker compose exec php php tests/architecture.php` |
 | Pruebas de punta a punta | `tests/smoke.sh` (añade `--with-db-stop` para parar y levantar la BD) |
 | Pruebas de permisos de la BD | `tests/privileges.sh` |
 | Composer | `docker compose exec php composer <comando>` |
@@ -126,16 +138,16 @@ docker compose ps        # los 4 servicios en running; db en healthy
 
 ## Pruebas
 
-Hay cuatro niveles y no necesitan instalar nada más que lo que ya usa el proyecto:
+Hay seis niveles y no necesitan instalar nada más que lo que ya usa el proyecto. **Para ejecutarlos todos** (por ejemplo antes de etiquetar una versión): `tests/run-all.sh` (o `tests/run-all.sh --with-db-stop`, que además para y levanta la BD para comprobar los 503).
 
 - **Unitarias** (`src/tests/unit.php`): la lógica pura (validador, entidad `User`, búsqueda, paginación, autenticación, origen, sesión, fechas, escape). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
 - **De integración** (`src/tests/integration.php`): los repositorios (`UserRepository`, `AdminRepository`: búsqueda, paginación, borrado lógico, duplicados, inicio de sesión) contra MySQL, sobre una tabla temporal que no toca tus datos. `bin/as-migrator php tests/integration.php` (necesita el usuario de migraciones: crea tablas temporales).
 - **De arquitectura** (`src/tests/architecture.php`): lee los archivos y comprueba que cada pieza cumple su sola responsabilidad: solo los repositorios ejecutan SQL, las páginas de `public/` y las vistas no tocan la BD, las vistas escapan toda salida y las clases se cargan por su nombre. `docker compose exec php php tests/architecture.php`.
 - **De permisos** (`tests/privileges.sh`): habla con MySQL como el usuario de la aplicación y el de migraciones y comprueba qué puede y qué NO puede hacer cada uno (`DROP`, `ALTER`, `DELETE`, `GRANT`, leer `mysql.user`...), y que `database/03-users.sh` es repetible y corrige a un usuario con demasiados permisos.
 - **De las migraciones** (`tests/migration-001.sh`, `-002.sh` y `-003.sh`): aplican `database/migrations/` a una BD temporal con el esquema anterior y comprueban que acaba igual que una instalación nueva. Usan root y borran sus bases temporales.
-- **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, origen en los tres POST, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
+- **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, inicio y cierre de sesión (cookie, fijación, caducidad), token CSRF y origen en todos los POST, búsqueda, paginación, borrado lógico, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Crea un administrador de prueba (`smoke-admin@example.com`) con el usuario de migraciones y lo borra al terminar. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
 
-Ambos terminan con código 0 si todo pasa y con 1 si algo falla, así que sirven también para automatizarlos. Si cambias el puerto o el origen, usa `BASE_URL` y `ORIGIN`.
+Todos terminan con código 0 si todo pasa y con 1 si algo falla, así que sirven también para automatizarlos. Si cambias el puerto o el origen, usa `BASE_URL` y `ORIGIN`.
 
 ## Estructura
 
@@ -149,6 +161,7 @@ crud-usuarios-docker/
 ├── bin/
 │   └── as-migrator          # Ejecuta un comando en PHP conectado a la BD como usuario de migraciones (M7)
 ├── tests/
+│   ├── run-all.sh           # Ejecuta todas las pruebas y resume el resultado
 │   ├── smoke.sh             # Pruebas de punta a punta con curl
 │   ├── migration-001.sh     # Prueba de la migración 001 con bases temporales
 │   ├── migration-002.sh     # Prueba de la migración 002
@@ -347,20 +360,23 @@ El visitante siempre ve un mensaje genérico; el detalle va al log del contenedo
 | Categoría | Excepción | HTTP | Etiqueta en el log |
 |-----------|-----------|------|--------------------|
 | Conexión (clave mala, BD apagada) | `DatabaseConnectionException` | 503 | `[connection]` |
-| Consulta (SQL inválido) | `PDOException` | 500 | `[query]` |
+| Consulta (SQL inválido, permiso que falta) | `PDOException` | 500 | `[query]` |
 | Configuración (falta una variable) | `RuntimeException` | 500 | `[config]` |
+
+`App\Http\Failure::describe()` hace la traducción; un correo o documento repetido es `DuplicateUserException` y se convierte en el aviso del campo (409).
 
 Códigos que devuelve la aplicación (regla: si el envío no se completó, nunca es 200):
 
 | HTTP | Cuándo |
 |------|--------|
 | 200 | Páginas normales |
-| 302 | Tras crear, editar o eliminar: redirección a `index.php?msg=...` |
-| 400 | `delete.php` con un id mal formado |
-| 403 | Un POST de `create.php`, `edit.php` o `delete.php` desde un origen que no es el propio sitio |
-| 404 | `edit.php` con un id inválido o inexistente; `status.php` fuera de `APP_ENV=local` |
-| 405 | `delete.php` con un método que no es POST (cabecera `Allow: POST`) |
-| 409 | Correo duplicado (el `UNIQUE` de la BD) o edición simultánea (otra persona modificó al usuario) |
+| 302 | Tras crear, editar, eliminar o restaurar: redirección a `index.php?msg=...`; sin sesión, a `login.php`; tras iniciar sesión, a `index.php` |
+| 400 | `delete.php` o `restore.php` con un id mal formado |
+| 401 | `login.php` con credenciales incorrectas (siempre el mismo mensaje) |
+| 403 | Un POST desde un origen que no es el propio sitio, o sin un token CSRF válido |
+| 404 | `edit.php` con un id inválido, inexistente o eliminado; `status.php` fuera de `APP_ENV=local` |
+| 405 | `delete.php`, `restore.php` o `logout.php` con un método que no es POST (cabecera `Allow: POST`) |
+| 409 | Correo o documento duplicado (el `UNIQUE` de la BD) o edición simultánea (otra persona modificó al usuario) |
 | 422 | Datos del formulario inválidos |
 | 500 | Fallo de consulta o de configuración |
 | 503 | La BD no está disponible |
@@ -375,7 +391,8 @@ Códigos que devuelve la aplicación (regla: si el envío no se completó, nunca
 - **MVP 5** Editar (Update)
 - **MVP 6** Eliminar (Delete)
 - **MVP 7** Revisión, errores comunes y comparación con la guía
-- **Mejoras** 1 Búsqueda · 2 Paginación · 3 Más campos · 4 Borrado lógico · 5 Inicio de sesión · 6 CSRF · 7 Usuario de BD dedicado · 8 Separación en capas
+- **Mejoras** 1 Búsqueda · 2 Paginación · 3 Más campos · 4 Borrado lógico · 5 Inicio de sesión · 6 CSRF · 7 Usuario de BD dedicado · 8 Separación en capas (todas hechas)
+- **Siguiente** (no planificado): front controller con router, PHPUnit, HTTPS, límite de intentos de login, cambio de contraseña; ver «Decisiones y límites» de cada mejora en `plan.md`
 
 ## Solución de problemas
 
@@ -393,8 +410,18 @@ Códigos que devuelve la aplicación (regla: si el envío no se completó, nunca
 
 **Tildes como `Ã³` al cargar datos.** El cliente `mysql` del contenedor se conecta como `latin1`. El seed lleva `SET NAMES utf8mb4;` al inicio; tras corregirlo hay que recrear la BD.
 
-**Una URL mal escrita muestra el listado en vez de un 404.** Nginx envía todo lo que no existe a `index.php` (comportamiento de *front controller*).
+**Una URL mal escrita muestra el listado (o el login) en vez de un 404.** Nginx envía todo lo que no existe a `index.php` (`try_files`), que pide sesión: sin ella redirige al login.
 
 **`Failed opening required ...` y la página responde 200.** Linux distingue mayúsculas y nombres exactos de archivo; con `display_errors` activo PHP muestra el fallo con estado 200.
+
+**No puedo entrar (login).** Una instalación nueva trae `admin@example.com` (ver «Usuarios y claves»). En una BD que ya existía crea uno con `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com`. Recrear el contenedor `php` cierra todas las sesiones (están en `/tmp` del contenedor).
+
+**«Token de seguridad no válido» (403) al enviar un formulario.** La sesión caducó (30 minutos sin actividad) o se abrió el formulario antes de iniciar sesión de nuevo: recarga la página e inténtalo otra vez.
+
+**`docker compose` dice «Falta DB_MIGRATION_PASSWORD».** Añade `DB_MIGRATION_USERNAME` y `DB_MIGRATION_PASSWORD` a `.env` (ver `.env.example`) y ejecuta `docker compose up -d` y `docker compose exec db bash /docker-entrypoint-initdb.d/03-users.sh`.
+
+**La aplicación responde 500 sin cuerpo y el log dice «Falta vendor/autoload.php».** `vendor/` no está en git: `docker compose exec php composer install` (o reinicia el contenedor `php`, que lo genera al arrancar tras `docker compose up -d --build`).
+
+**`SQLSTATE ... command denied` en el log.** El usuario de BD de la aplicación solo puede `SELECT`, `INSERT` y `UPDATE` en lo que necesita (mínimo privilegio): si añades una consulta nueva, amplía `database/03-users.sh` y vuelve a ejecutarlo; los scripts de consola que cambian datos se lanzan con `bin/as-migrator`.
 
 **Xdebug no conecta con VS Code.** Pon `XDEBUG_MODE=debug` en `.env`, ejecuta `docker compose up -d`, arranca "Escuchar Xdebug (Docker)" (puerto 9003) y revisa el firewall.

@@ -15,8 +15,8 @@ declare(strict_types=1);
  * Es un token POR SESIÓN (no por petición): sirve para varias pestañas y para el botón «atrás». Se renueva
  * al iniciar sesión (log_in_admin() reemplaza $_SESSION) y desaparece al cerrarla.
  *
- * Capas, de fuera adentro: comprobación de Origin/Referer (request-guard.php), SameSite=Lax en la cookie
- * (session.php) y este token. Ninguna sustituye a las otras.
+ * Capas, de fuera adentro: comprobación de Origin/Referer (app/Security/request-guard.php), SameSite=Lax en la cookie
+ * (app/Security/session.php) y este token. Ninguna sustituye a las otras.
  */
 
 /** Nombre del campo oculto de los formularios. */

@@ -15,7 +15,7 @@ services:
       # Carpetas de configuración de PHP: la de siempre y una por entorno (docker/php/php.local.ini solo
       # existe para "local"). Con cualquier otro APP_ENV no se carga nada más: PHP queda en modo seguro.
       PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/usr/local/etc/php/env/${APP_ENV:-local}
-      # Origen público de la aplicación (esquema + host + puerto). Lo usa delete.php para aceptar
+      # Origen público de la aplicación (esquema + host + puerto). Lo usan los POST (reject_foreign_origin()) para aceptar
       # solo peticiones que vienen de este sitio. Por defecto se deriva de APP_PORT.
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:${APP_PORT:-8080}}
       DB_HOST: ${DB_HOST}
@@ -43,7 +43,7 @@ services:
 
   db:
     image: mysql:8.4
-    # Zona horaria del servidor fija en UTC (las fechas se guardan en UTC; ver helpers.php).
+    # Zona horaria del servidor fija en UTC (las fechas se guardan en UTC; ver format_utc_datetime() en src/app/support.php).
     command: ["--default-time-zone=+00:00"]
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}

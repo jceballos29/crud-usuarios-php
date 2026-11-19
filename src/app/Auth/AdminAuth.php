@@ -10,7 +10,7 @@ use PDOException;
 /**
  * Autenticación de administradores (M5): reglas de las credenciales y comprobación contra la BD.
  * La parte pura (normalizar, validar) se prueba sola en src/tests/unit.php; authenticate() necesita
- * un AdminRepository (con BD) y se prueba en src/tests/integration.php. La sesión (cookie, expiración) está en session.php.
+ * un AdminRepository (con BD) y se prueba en src/tests/integration.php. La sesión (cookie, expiración) está en app/Security/session.php.
  */
 final class AdminAuth
 {

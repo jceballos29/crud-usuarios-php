@@ -130,7 +130,7 @@ final class Pagination
     /**
      * Parámetros de URL que describen el estado del listado, con los valores por defecto omitidos.
      *
-     * @param string $search Término ya limpio con parse_search_term().
+     * @param string $search Término ya limpio con UserSearch::parseTerm().
      * @param int $page Página (>= 1).
      * @param string $view Pagination::VIEW_ACTIVE (se omite) o Pagination::VIEW_INACTIVE.
      * @return array<string, string|int> Vacío si es la vista normal, página 1 y sin búsqueda.
@@ -160,7 +160,7 @@ final class Pagination
      * texto buscado pueden romper la URL ni colar otra cabecera en un `Location:`. En HTML se escribe con
      * escape(), que convierte `&` en `&amp;`.
      *
-     * @param string $search Término ya limpio con parse_search_term().
+     * @param string $search Término ya limpio con UserSearch::parseTerm().
      * @param int $page Página (>= 1).
      * @param array<string, string|int> $extra Parámetros extra que van antes del estado.
      * @param string $view Pagination::VIEW_ACTIVE o Pagination::VIEW_INACTIVE.

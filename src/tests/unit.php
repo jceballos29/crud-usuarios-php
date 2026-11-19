@@ -230,7 +230,7 @@ section('UserSearch::where() y UserSearch::countQuery(): el mismo filtro para li
 same('sin búsqueda: solo el filtro de usuarios visibles', [' WHERE active = :active', [':active' => 1]], UserSearch::where(''));
 same('sin búsqueda, vista de eliminados', [' WHERE active = :active', [':active' => 0]], UserSearch::where('', false));
 same('con búsqueda: active va FUERA del paréntesis del OR (si no, un eliminado que case se colaría)', true, str_starts_with(UserSearch::where('x')[0], ' WHERE active = :active AND (') && str_ends_with(UserSearch::where('x')[0], ')'));
-same('con búsqueda: :active es un entero (bind_all lo enlaza con PARAM_INT)', true, is_int(UserSearch::where('x')[1][':active']));
+same('con búsqueda: :active es un entero (UserRepository lo enlaza con PARAM_INT)', true, is_int(UserSearch::where('x')[1][':active']));
 same('recuento sin búsqueda', ['SELECT COUNT(*) FROM users WHERE active = :active', [':active' => 1]], UserSearch::countQuery(''));
 same('recuento de eliminados', [':active' => 0], UserSearch::countQuery('', false)[1]);
 [$countSql, $countParams] = UserSearch::countQuery('laura');
@@ -245,7 +245,7 @@ same('sin búsqueda: active y los parámetros de la página', [':active' => 1, '
 same('la vista de eliminados pide active = 0', 0, UserSearch::listQuery('', 10, 0, false)[1][':active']);
 same('sin búsqueda: el único filtro es active', true, str_contains($allSql, ' WHERE active = :active ORDER BY'));
 same('ordena por id descendente y pagina', true, str_ends_with($allSql, 'ORDER BY id DESC LIMIT :limit OFFSET :offset'));
-same('LIMIT y OFFSET son enteros de PHP (bind_all los enlaza con PARAM_INT)', [true, true], [is_int($allParams[':limit']), is_int($allParams[':offset'])]);
+same('LIMIT y OFFSET son enteros de PHP (UserRepository los enlaza con PARAM_INT)', [true, true], [is_int($allParams[':limit']), is_int($allParams[':offset'])]);
 [$sql, $params] = UserSearch::listQuery('laura', 10, 20);
 preg_match_all('/:q\d+/', $sql, $matches);
 same('con búsqueda: 6 marcadores de columna', 6, count($matches[0]));

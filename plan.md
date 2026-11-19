@@ -23,6 +23,8 @@ La guía original usa español; **tu código va en inglés** y el plan ya usa tu
 
 El texto que ve el usuario final sigue en español.
 
+> **Nota sobre el tiempo verbal del documento.** Los pasos de la Parte A y de las mejoras M1 a M7 describen el código **tal como estaba en ese momento** (con `includes/`, `connection.php`, `describe_failure()`...): son el diario del aprendizaje y no se reescribieron. En la mejora M8 todo ese código pasó a clases con namespace (`src/app/`) y vistas (`src/views/`). La estructura **actual** está en el [Anexo E](#e-estructura-de-carpetas) y en el [`README.md`](README.md); para ejecutar todas las pruebas, `tests/run-all.sh`.
+
 ## Progreso general
 
 | Fase | Resultado | Estado |
@@ -364,7 +366,7 @@ Concepto: las demás páginas redirigirán a `index.php?msg=created`. El listado
 El CSS no es el foco del curso. Clases que usa la guía (§7.7): `.contenedor`, `.btn`, `.btn-claro`, `.btn-sm`, `.mensaje`, `.errores`, `.formulario`, `.campo`, `.vacio`.
 
 - [x] Decisión actual: Bootstrap 6.0.0-alpha.1 (CSS y JS) + Bootstrap Icons por CDN (en `header.php`). Compromisos: depende de internet y de un tercero; investiga el atributo `integrity` (SRI) en las etiquetas `<link>`/`<script>` para verificar que el archivo no fue alterado.
-- [ ] Opcional: CSS propio en `public/css/style.css` (estilo de la guía: blanco y negro, Arial). Si lo haces, verifica que Nginx lo sirve: http://localhost:8080/css/style.css.
+- [ ] Opcional (no se hizo; se quedó Bootstrap por CDN): CSS propio en `public/css/style.css` (estilo de la guía: blanco y negro, Arial). Si lo haces, verifica que Nginx lo sirve: http://localhost:8080/css/style.css.
 
 ### 3.7 Botones (aún sin función)
 
@@ -1281,7 +1283,25 @@ src/
 └── scripts/  db-check.php  info.php
 ```
 
-En M8 aparece `src/app/` (namespace `App\`, autoload PSR-4 con Composer) con entidades, repositorio, validador y excepciones; `includes/` se va disolviendo.
+**Estructura final (tras M8, 2026-11-19):**
+
+```
+crud-usuarios-docker/
+├── docker-compose.yml, .env(.example), docker/    # stack; docker/php/entrypoint.sh genera vendor/ si falta
+├── bin/as-migrator                                # comando en PHP como usuario de migraciones (M7)
+├── database/  01-schema.sql  02-seed.sql  03-users.sh  migrations/001..003
+├── tests/     run-all.sh  smoke.sh  privileges.sh  migration-001..003.sh  csrf-demo/
+└── src/
+    ├── composer.json, composer.lock, bootstrap.php        # autoload PSR-4 (App\ -> app/); vendor/ no va a git
+    ├── public/   index create edit delete restore login logout status .php   # 7 líneas cada una
+    ├── app/      Controller/ Repository/ Domain/ Validation/ Search/ Http/ Auth/ Database/
+    │             Config/ Logging/ Exceptions/ View/ Container.php support.php Security/
+    ├── views/    layout/ users/ auth/ partials/ status.php
+    ├── scripts/  create-admin.php seed-demo.php db-check.php info.php        # solo consola
+    └── tests/    unit.php integration.php architecture.php harness.php
+```
+
+`includes/` desapareció: lo que tenía se repartió en `app/` (clases y funciones) y `views/`.
 
 ## F. Decisiones y lecciones registradas
 
@@ -1298,11 +1318,16 @@ En M8 aparece `src/app/` (namespace `App\`, autoload PSR-4 con Composer) con ent
 | Cabeceras de seguridad y CSP | Nginx las pone en todas las respuestas y la CSP no permite scripts ni estilos en línea, por lo que el diálogo de eliminar usa `data-confirm` + `js/confirm-submit.js`. Si se añade otra CDN, script o `<style>` en línea hay que cambiar la política en `docker/nginx/default.conf` |
 | `status.php` | Solo con `APP_ENV=local` (404 en cualquier otro entorno): enseña las versiones de PHP y MySQL |
 | Tiempo de conexión | `PDO::ATTR_TIMEOUT = 5`: una BD que no responde falla en 5 s con un 503 y no tras 30 s |
-| Pruebas | Versionadas: `src/tests/unit.php` (funciones puras) y `tests/smoke.sh` (punta a punta con `curl`, opcionalmente parando la BD). Sin PHPUnit hasta M8 |
+| Pruebas | Versionadas y sin PHPUnit (arnés propio `src/tests/harness.php`): unitarias (`unit.php`), integración (`integration.php`, con tablas temporales), arquitectura (`architecture.php`), permisos de la BD (`tests/privileges.sh`), migraciones (`tests/migration-00N.sh`) y de punta a punta (`tests/smoke.sh`, con `curl`). `tests/run-all.sh` las ejecuta todas |
 | Entornos y errores | `APP_ENV=local` carga `docker/php/php.local.ini` (errores en pantalla); cualquier otro valor deja PHP en modo seguro (errores solo al log, un fallo grave responde 500 con el cuerpo vacío). El mecanismo es `PHP_INI_SCAN_DIR` en `docker-compose.yml` |
-| Fallos de la capa de datos | Un solo `catch (RuntimeException)` por página y `describe_failure()` decide 503 (sin conexión), 500 (consulta) o 500 (configuración) y registra con su etiqueta. El `$pdo` global sigue hasta M8 |
+| Fallos de la capa de datos | Un solo `catch (RuntimeException)` por controlador y `App\Http\Failure::describe()` decide 503 (sin conexión), 500 (consulta) o 500 (configuración) y registra con su etiqueta; un valor repetido es `DuplicateUserException` (409). El detalle técnico nunca llega al visitante |
 | Ediciones simultáneas | Bloqueo optimista con `row_token` (sha256 del contenido de la fila): 409 si otra persona la cambió; sin columna nueva en la tabla |
 | Autocomplete | `autocomplete="off"` en el formulario de usuario: son datos de otra persona, y las pistas `given-name`, `email`, `tel` harían que el navegador rellene los del propio usuario |
 | Versión de PHP | `php:8.4.27-fpm`, fijada: subirla a mano a propósito (y volver a pasar las pruebas) para recibir parches de seguridad |
-| Seguridad de rutas | `includes/` y `scripts/` fuera de `public/` |
-| Deuda: CSRF en `create.php` y `edit.php` | **Reducida, no cerrada.** Desde 2026-11-19 los POST de `create.php`, `edit.php` y `delete.php` comprueban el origen (`Origin`/`Referer` contra `APP_ORIGIN`, 403) con `reject_foreign_origin()`, así que un formulario oculto en otro sitio ya no puede dar de alta, editar ni borrar. Falta el **token CSRF** en todos los formularios POST (login, crear, editar, eliminar, logout), verificado con `hash_equals`, que se hace en M6 y necesita la sesión de M5: la comprobación de origen no lo sustituye (no cubre a un cliente que no envía ninguna de las dos cabeceras de forma legítima, y se basa en cabeceras que solo un navegador pone de forma fiable) |
+| Seguridad de rutas | Solo `public/` es accesible por URL; `app/`, `views/`, `vendor/`, `scripts/` y `tests/` quedan fuera |
+| Borrado | **Lógico** (`active`): eliminar es un `UPDATE`, hay vista de eliminados y restaurar; los `UNIQUE` siguen cubriendo a los eliminados y el aviso lo explica. No hay borrado definitivo desde la aplicación (derecho de supresión: a mano con `crud_migrator` o `root`) |
+| Autenticación | Tabla `admins` con hash bcrypt, `login.php` con respuesta y tiempo iguales para correo inexistente y clave mala, sesión `crud_session` (`HttpOnly`, `SameSite=Lax`, id nuevo al entrar, 30 min de inactividad). Contraseñas de 10 a 72 bytes y sin NUL (bcrypt las truncaba). Sin límite de intentos fallidos (solo diseño) |
+| Usuarios de la BD | `crud_app` (SELECT/INSERT/UPDATE por tabla, sin DELETE ni DDL) y `crud_migrator` (todo sobre su base, solo a mano con `bin/as-migrator`); los crea `database/03-users.sh` desde `.env`. Claves de desarrollo documentadas en el README |
+| Arquitectura | Capas: página (7 líneas) -> controlador -> validador y repositorio (único SQL) -> entidad `User`; vistas aparte. Composer solo para el autoload PSR-4. Las ayudas de la petición (`origin`, `session`, `csrf`) siguen como funciones. Sin front controller ni PHPUnit |
+| Migraciones | Versionadas en `database/migrations/` (001 a 003) y siempre duplicadas en `01-schema.sql`; cada una tiene un script que comprueba que migrar deja el mismo esquema que una instalación nueva. Se aplican a mano y una sola vez (no hay registro de cuáles se aplicaron) |
+| CSRF (antes «deuda») | **Cerrada en M6.** Tres capas, ninguna sustituye a las otras: comprobación de `Origin`/`Referer` contra `APP_ORIGIN` (403), cookie `SameSite=Lax` y **token CSRF por sesión** en los seis formularios POST (`hash_equals`, se renueva al iniciar sesión) |

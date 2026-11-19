@@ -124,7 +124,7 @@ final class UserSearch
      * Consulta de UNA página del listado, con o sin búsqueda.
      *
      * Los parámetros de LIMIT y OFFSET son **enteros de PHP** y hay que enlazarlos como tales
-     * (bind_all() en helpers.php los enlaza con PDO::PARAM_INT). Con consultas nativas MySQL perdona un
+     * (UserRepository los enlaza con PDO::PARAM_INT). Con consultas nativas MySQL perdona un
      * texto como "10", pero con consultas emuladas PDO escribiría `LIMIT '10'` y daría un error de sintaxis.
      * Se fuerzan a un valor válido (LIMIT >= 1, OFFSET >= 0) porque MySQL rechaza los negativos.
      *
@@ -135,7 +135,7 @@ final class UserSearch
      * @param int $limit Filas por página.
      * @param int $offset Filas que se saltan: (página - 1) * filas por página.
      * @param bool $active true = usuarios visibles; false = los eliminados.
-     * @return array{0: string, 1: array<string, string|int>} [consulta SQL, parámetros para bind_all()]
+     * @return array{0: string, 1: array<string, string|int>} [consulta SQL, parámetros para UserRepository]
      */
     public static function listQuery(string $term, int $limit, int $offset, bool $active = true): array
     {

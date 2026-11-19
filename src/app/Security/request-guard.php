@@ -10,7 +10,7 @@ declare(strict_types=1);
  *
  * Responde "¿quién pide?" antes que "¿qué pide?": una petición de origen desconocido no recibe
  * nada, ni siquiera la validación de lo que envía. Esta función SÍ lee $_SERVER y el entorno y
- * responde (a diferencia de las funciones puras de origin.php, que son las que la sostienen).
+ * responde (a diferencia de las funciones puras de app/Security/origin.php, que son las que la sostienen).
  *
  * Si APP_ORIGIN falta o no es un origen válido es un error de configuración, no culpa del
  * visitante: responde 500 y lo registra, en lugar de un 403.

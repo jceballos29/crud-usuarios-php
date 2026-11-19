@@ -11,7 +11,7 @@ use App\Search\UserSearch;
  *
  * @var string|null $errorMessage
  * @var list<User> $users
- * @var string $search Término buscado ya limpio ('' si no hay búsqueda); parse_search_term() en user-search.php.
+ * @var string $search Término buscado ya limpio ('' si no hay búsqueda); UserSearch::parseTerm().
  * @var string $view Pagination::VIEW_ACTIVE (usuarios visibles) o Pagination::VIEW_INACTIVE (eliminados, con «Restaurar»).
  * @var array{page: int, pages: int, perPage: int, offset: int, total: int, from: int, to: int} $pagination Resultado de paginate().
  */

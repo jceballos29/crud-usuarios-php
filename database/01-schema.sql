@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
     -- Texto y no numero: admite ceros a la izquierda y letras (pasaportes). UNIQUE admite varios NULL.
     document VARCHAR(20) DEFAULT NULL,
     birth_date DATE DEFAULT NULL,
-    -- Los roles validos tambien estan en user_roles() (src/includes/user-validation.php); una prueba los compara.
+    -- Los roles validos tambien estan en User::roles() (src/app/Domain/User.php); una prueba los compara.
     role ENUM('user', 'editor', 'admin') NOT NULL DEFAULT 'user',
     -- Mejora 4 (misma definicion que database/migrations/002-active.sql: mantener ambos).
     -- Borrado logico: 1 = visible, 0 = eliminado (la fila se conserva).
