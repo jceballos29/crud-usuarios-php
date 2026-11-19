@@ -35,7 +35,7 @@ El texto que ve el usuario final sigue en español.
 | 5 | Editar usuario (Update) | [x] |
 | 6 | Eliminar usuario (Delete) | [x] |
 | 7 | Revisión final del CRUD | [x] |
-| M1 | Búsqueda y filtros | [ ] |
+| M1 | Búsqueda y filtros | [x] |
 | M2 | Paginación | [ ] |
 | M3 | Más campos | [ ] |
 | M4 | Borrado lógico | [ ] |
@@ -934,18 +934,34 @@ Orden recomendado (de menor a mayor dificultad). Cada mejora se hace en una rama
 **Objetivo:** filtrar el listado por texto.
 **Concepto:** una búsqueda es una petición **GET** (se puede compartir la URL). Se usa `WHERE ... LIKE :busqueda` con consulta preparada.
 
-- [ ] Formulario en `index.php` con `method="get"` y un campo `q`.
-- [ ] Lee `$_GET['q'] ?? ''` y aplica `trim`.
-- [ ] Si hay texto, usa `prepare` con `WHERE name LIKE :q1 OR last_name LIKE :q2 OR email LIKE :q3`. Los comodines `%` van **dentro del valor** que pasas (`'%' . $q . '%'`), no pegados al SQL.
-- [ ] **Trampa a entender:** como PDO usa `ATTR_EMULATE_PREPARES => false`, **no puedes repetir el mismo marcador** (`:q`) tres veces. Pruébalo, lee el error (`HY093`) y resuélvelo con marcadores distintos.
-- [ ] Si no hay texto, la consulta original sigue funcionando.
-- [ ] El campo de búsqueda conserva el texto escrito (escapado).
-- [ ] Mensaje "No se encontraron resultados para ..." (distinto del estado vacío general).
-- [ ] Enlace "Limpiar búsqueda".
-- [ ] Reflexión: ¿qué ocurre si el usuario busca `%` o `_`? (son comodines de LIKE). Investiga cómo escaparlos.
-- [ ] Pruebas: busca por nombre, apellido, parte del correo, sin resultados, con tildes (`gomez` vs `Gómez`: ¿qué hace la collation?).
+- [x] Formulario en `index.php` con `method="get"` y un campo `q`.
+    - **Hecho:** `<form method="get" action="index.php" role="search">` con `<input type="search" name="q">`, en el parcial `users-list.php` (que `index.php` incluye). Solo aparece si hay usuarios que buscar o ya hay una búsqueda activa: con la BD vacía no se muestra un buscador inútil. La etiqueta usa `visually-hidden` (existe en este Bootstrap 6) y no se depende de que el navegador muestre el `placeholder`.
+- [x] Lee `$_GET['q'] ?? ''` y aplica `trim`.
+    - **Hecho en `parse_search_term()`** (`includes/user-search.php`, función pura): lo que no es texto (`?q[]=x`) cuenta como sin búsqueda, tabuladores y saltos de línea pasan a un espacio, los espacios repetidos se juntan, y se recorta a 254 caracteres (la columna más larga, el correo; el recorte es por caracteres y no por bytes, y una prueba comprueba que coincide con `user_fields()`). Un UTF-8 inválido también cuenta como sin búsqueda.
+- [x] Si hay texto, usa `prepare` con `WHERE name LIKE :q1 OR last_name LIKE :q2 OR email LIKE :q3`. Los comodines `%` van **dentro del valor** que pasas (`'%' . $q . '%'`), no pegados al SQL.
+    - **Hecho en `user_list_query()`.** El plan nombra tres columnas (`name`, `last_name`, `email`); se ampliaron a **cinco** porque son las que el usuario ve en el listado: también el **nombre completo** (`CONCAT(name, ' ', last_name)`, para que "Laura Gómez" encuentre a Laura Gómez) y el **teléfono**. Los `%` de los extremos van dentro del valor (`like_pattern()`), nunca pegados al texto SQL; lo único que se escribe en el SQL son nombres de columna fijos y números de marcador. Un texto hostil como `'; DROP TABLE users; --` no aparece en la consulta: viaja solo como parámetro (probado).
+- [x] **Trampa a entender:** como PDO usa `ATTR_EMULATE_PREPARES => false`, **no puedes repetir el mismo marcador** (`:q`) tres veces. Pruébalo, lee el error (`HY093`) y resuélvelo con marcadores distintos.
+    - **Provocado y leído:** con `EMULATE_PREPARES => false`, `WHERE name LIKE :q OR last_name LIKE :q OR email LIKE :q` da `SQLSTATE[HY093]: Invalid parameter number`. La causa: con prepares de verdad, MySQL recibe `?` posicionales y PDO convierte los nombres; un nombre repetido deja más `?` que valores. **Solución:** un marcador por columna (`:q0`, `:q1`...), todos con el mismo patrón. Dos pruebas unitarias lo guardan (5 marcadores, ninguno repetido) y se comprobó que fallan si se vuelve a repetir `:q`.
+- [x] Si no hay texto, la consulta original sigue funcionando.
+    - **Hecho:** `user_list_query('')` devuelve la consulta de siempre (`... ORDER BY id DESC`) y ningún parámetro; el resto del listado no cambia.
+- [x] El campo de búsqueda conserva el texto escrito (escapado).
+    - **Hecho y comprobado con texto hostil:** `<script>alert(1)</script>` sale como `&lt;script&gt;...` tanto en el campo como en el mensaje, y `'; DROP TABLE users; --` sale como `&#039;; DROP TABLE...`.
+- [x] Mensaje "No se encontraron resultados para ..." (distinto del estado vacío general).
+    - **Hecho:** responde **200** (la búsqueda se completó; solo que no hay filas), con el mensaje propio, sin tabla y distinto de "No hay usuarios registrados.". Con resultados muestra "1 resultado para «…»" o "N resultados para «…»".
+- [x] Enlace "Limpiar búsqueda".
+    - **Hecho:** aparece solo cuando hay una búsqueda activa y lleva a `index.php`.
+- [x] Reflexión: ¿qué ocurre si el usuario busca `%` o `_`? (son comodines de LIKE). Investiga cómo escaparlos.
+    - **Respuesta (medida en la BD):** `%` y `_` son comodines de `LIKE`, así que sin escapar dan falsos positivos. Con cuatro usuarios de prueba (`Pct%Real`, `PctXReal`, `Sub_Real`, `SubXReal`): buscar `%` sin escapar casa con **todos**; buscar `Pct%Real` sin escapar encuentra `Pct%Real` **y** `PctXReal`; `Sub_Real` encuentra `Sub_Real` **y** `SubXReal`. Con el escape (`\%` y `\_`) cada búsqueda encuentra solo el literal. **Hay que escapar también la barra invertida, y en el orden correcto:** primero la barra (o todo a la vez con `strtr`, que no vuelve a leer lo sustituido), porque si se escapan antes `%` y `_` y luego la barra, esta duplica las barras recién añadidas. Una prueba falla con el orden invertido (se comprobó rompiendo el código a propósito). Requiere que `sql_mode` no incluya `NO_BACKSLASH_ESCAPES`; `smoke.sh` lo verifica.
+- [x] Pruebas: busca por nombre, apellido, parte del correo, sin resultados, con tildes (`gomez` vs `Gómez`: ¿qué hace la collation?).
+    - **Hecho:** 35 pruebas unitarias nuevas (170 en total) y 29 de punta a punta nuevas (196 con `--with-db-stop`), que cubren: nombre, apellido, nombre completo, parte del correo y del teléfono, sin resultados, mayúsculas, tildes, espacios repetidos, `%`, `_` y `\`, vacío, `q[]=x`, `q` junto a `msg`, inyección, XSS, 600 caracteres, y el 503 con la BD parada. **Sobre las tildes y la collation:** `gomez`, `GÓMEZ` y `Gómez` encuentran lo mismo porque `utf8mb4_unicode_ci` ignora mayúsculas **y** tildes (con `utf8mb4_bin` no pasaría). Un detalle de esa collation: también iguala `n` con `ñ`, algo que un usuario hispanohablante a veces no espera.
 
 **Preguntas:** ¿por qué los `%` no se concatenan en el SQL? ¿por qué GET y no POST?
+
+**Respuestas a las preguntas.**
+- **¿Por qué los `%` no se concatenan en el SQL?** Porque lo que se concatena en el SQL se interpreta como código. Si fuera `"... LIKE '%" . $q . "%'"`, el texto del visitante formaría parte de la consulta y `'; DROP TABLE users; --` dejaría de ser un texto para convertirse en SQL (inyección). Con una consulta preparada, MySQL recibe primero la plantilla (`LIKE :q0`) y después el patrón como **dato**; los `%` van dentro de ese dato (`'%' . $q . '%'`), así que son parte del valor y nunca del código. Es además el motivo por el que hay que escapar los comodines del propio texto: el patrón sigue siendo un patrón de `LIKE`, aunque ya no sea código.
+- **¿Por qué GET y no POST?** Una búsqueda **no cambia nada**: es una consulta, y las consultas son GET (segura e idempotente). Con GET la URL (`index.php?q=laura`) se puede copiar, compartir y guardar en favoritos; el botón "atrás" y recargar funcionan sin la pregunta "¿reenviar el formulario?"; y los rastreadores o precargas pueden pedirla sin consecuencias. POST se reserva para lo que modifica datos (crear, editar, eliminar), que es lo que el patrón PRG y la comprobación de origen protegen. Lo que sí hay que vigilar con GET es que lo escrito queda en el historial y en los registros del servidor: no es un sitio para datos sensibles.
+
+**Decisiones y límites de M1 (2026-11-19).** (1) Se amplió el alcance a nombre completo y teléfono porque son lo que el usuario ve y teclea. (2) Una búsqueda sin resultados responde **200**, no 404. (3) El filtro **no se conserva** al volver de crear, editar o eliminar: se vuelve al listado completo; conservar el estado es un problema que aparece de verdad con la paginación (M2). (4) `LIKE '%texto%'` no puede usar un índice y recorre la tabla; con cientos de usuarios es imperceptible y M2 limita cuántas filas se piden. (5) **Sin comprobar en un navegador** (la extensión no estaba conectada): el aspecto del buscador (la fila con el campo y los botones) y que `type="search"` muestre la "x" de borrar en cada navegador.
 
 ## M2. Paginación
 

@@ -7,6 +7,7 @@ declare(strict_types=1);
  *
  * @var string|null $errorMessage
  * @var array<int, array{id: int|string, name: string, last_name: string, email: string, phone: ?string, created_at: string}> $users
+ * @var string $search Término buscado ya limpio ('' si no hay búsqueda); parse_search_term() en user-search.php.
  */
 ?>
 <?php if ($errorMessage !== null): ?>
@@ -21,11 +22,33 @@ declare(strict_types=1);
     <a class="btn-solid theme-primary" href="create.php" role="button">Registrar usuario</a>
 </div>
 
+<?php if ($users !== [] || $search !== ''): ?>
+    <?php /* El buscador solo tiene sentido si hay usuarios que buscar o ya hay una búsqueda activa. */ ?>
+    <form method="get" action="index.php" role="search" class="mb-4">
+        <label for="q" class="visually-hidden">Buscar usuarios</label>
+        <div class="d-flex align-items-center gap-2">
+            <input type="search" id="q" name="q" class="form-control" value="<?= escape($search) ?>" maxlength="<?= SEARCH_TERM_MAX ?>" placeholder="Buscar por nombre, apellido, correo o teléfono" autocomplete="off">
+            <button type="submit" class="btn-solid theme-primary">Buscar</button>
+            <?php if ($search !== ''): ?>
+                <a class="btn-outline" href="index.php" role="button">Limpiar búsqueda</a>
+            <?php endif; ?>
+        </div>
+    </form>
+<?php endif; ?>
+
 <?php if ($users === []): ?>
     <div class="alert" role="alert">
-        <p>No hay usuarios registrados.</p>
+        <?php if ($search !== ''): ?>
+            <p>No se encontraron resultados para «<?= escape($search) ?>».</p>
+        <?php else: ?>
+            <p>No hay usuarios registrados.</p>
+        <?php endif; ?>
     </div>
     <?php return; ?>
+<?php endif; ?>
+
+<?php if ($search !== ''): ?>
+    <p class="mb-2"><?= count($users) === 1 ? '1 resultado' : count($users) . ' resultados' ?> para «<?= escape($search) ?>».</p>
 <?php endif; ?>
 
 <table class="table">

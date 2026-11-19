@@ -129,6 +129,49 @@ STORED=$(sql "SELECT created_at FROM users WHERE id=$UO;")
 [ "$(docker compose exec -T php php -r 'echo abs(time() - strtotime($argv[1] . " UTC")) < 180 ? "ok" : "mal";' -- "$STORED")" = ok ]; ok "la BD guarda la fecha en UTC ($STORED)" $?
 [ "$(sql 'SELECT @@session.time_zone, @@global.time_zone;' | tr '\t' ' ')" = "+00:00 +00:00" ]; ok "el servidor de BD trabaja en UTC" $?
 
+section "Búsqueda (M1): GET ?q=texto"
+# Usuarios de prueba: uno con tildes y teléfono, y dos parejas para probar los comodines de LIKE.
+curl -s -o /dev/null -H "Origin: $ORIGIN" --data-urlencode "name=Zoé" --data-urlencode "last_name=Núñez-Smoke" -d "email=smoke-busq-a@example.com" --data-urlencode "phone=+57 300 777 8888" "$BASE/create.php"
+create "Pct%Real" "Smoke" "smoke-busq-b@example.com"
+create "PctXReal" "Smoke" "smoke-busq-c@example.com"
+create "Sub_Real" "Smoke" "smoke-busq-d@example.com"
+create "SubXReal" "Smoke" "smoke-busq-e@example.com"
+search() { chk "q=$1" 200 --get --data-urlencode "q=$1" "$BASE/"; }
+shows() { tr -d '\n' < "$TMP/body" | grep -qF "$1"; }
+search "smoke-busq"; shows "5 resultados para «smoke-busq»"; ok "cuenta los resultados (5, en plural)" $?
+search "smoke-busq-a"; shows "1 resultado para «smoke-busq-a»"; ok "cuenta un solo resultado (en singular)" $?
+search "ZOE NUNEZ-SMOKE"; shows "Núñez-Smoke"; ok "ignora mayúsculas y tildes, y busca en el nombre completo (\"Zoé Núñez-Smoke\")" $?
+search "nunez"; shows "Núñez-Smoke"; ok "encuentra por apellido sin la tilde" $?
+search "zoe     nunez"; shows "Núñez-Smoke"; ok "los espacios repetidos se juntan" $?
+search "busq-a@"; shows "Núñez-Smoke"; ok "encuentra por una parte del correo" $?
+search "777 8888"; shows "Núñez-Smoke"; ok "encuentra por una parte del teléfono" $?
+search "%"; shows "Pct%Real"; ok "q=% encuentra solo a quien tiene un % de verdad..." $?
+! shows "PctXReal"; ok "...y no a PctXReal (el % no es un comodín)" $?
+search "Pct%Real"; shows "Pct%Real" && ! shows "PctXReal"; ok "q=Pct%Real encuentra solo el literal" $?
+search "_"; shows "Sub_Real"; ok "q=_ encuentra el guion bajo de verdad..." $?
+! shows "SubXReal"; ok "...y no SubXReal (el _ no casa con cualquier letra)" $?
+search '\'; ok "q=\\ (una barra invertida) no rompe la consulta" 0
+! grep -qiE 'Fatal error|SQLSTATE' "$TMP/body"; ok "...ni deja ningún error en la página" $?
+search "zzzz-no-existe"; shows "No se encontraron resultados para «zzzz-no-existe»"; ok "sin resultados: mensaje propio (distinto de \"No hay usuarios registrados\")" $?
+! shows "No hay usuarios registrados"; ok "...que no es el del estado vacío general" $?
+grep -q '<table' "$TMP/body"; [ $? -ne 0 ]; ok "...y no pinta la tabla" $?
+shows "Limpiar búsqueda"; ok "...pero sí ofrece \"Limpiar búsqueda\"" $?
+grep -q 'value="zzzz-no-existe"' "$TMP/body"; ok "el campo conserva lo que se escribió" $?
+chk "q vacío" 200 --get --data-urlencode "q=" "$BASE/"; shows "Núñez-Smoke"; ok "q vacío lista todo" $?
+! shows "Limpiar búsqueda"; ok "...y sin búsqueda no hay enlace \"Limpiar búsqueda\"" $?
+grep -q 'role="search"' "$TMP/body" && grep -q 'name="q"' "$TMP/body" && grep -q 'type="search"' "$TMP/body"; ok "el formulario es un GET de role=search con un campo type=search name=q" $?
+tr -d '\n' < "$TMP/body" | grep -qE '<form method="get" action="index.php" role="search"'; ok "...que usa el método GET (la URL se puede compartir)" $?
+chk "q[]=x (un arreglo)" 200 "$BASE/?q%5B%5D=x"; shows "Núñez-Smoke"; ok "un arreglo cuenta como \"sin búsqueda\" y lista todo" $?
+chk "q junto con msg" 200 "$BASE/?q=zoe&msg=created"; shows "Núñez-Smoke" && grep -q 'alert theme-success' "$TMP/body"; ok "q y msg conviven: resultados y aviso" $?
+search "' OR '1'='1"; shows "No se encontraron resultados"; ok "un intento de inyección es texto literal: sin resultados" $?
+search "'; DROP TABLE users; --"; [ "$(sql 'SELECT COUNT(*) FROM users;')" -ge 5 ]; ok "...y la tabla users sigue ahí" $?
+tr -d '\n' < "$TMP/body" | grep -qF "No se encontraron resultados para «&#039;; DROP TABLE users; --»"; ok "...y el texto se muestra escapado" $?
+search "<script>alert(1)</script>"; ! grep -qF '<script>alert(1)' "$TMP/body"; ok "XSS: el texto buscado no sale como HTML" $?
+grep -qF '&lt;script&gt;alert(1)&lt;/script&gt;' "$TMP/body"; ok "...sale escapado, tanto en el campo como en el mensaje" $?
+LONG=$(printf 'a%.0s' $(seq 1 600)); search "$LONG"
+[ "$(tr -d '\n' < "$TMP/body" | grep -oE 'value="a+"' | head -1 | sed -E 's/value="(a+)"/\1/' | tr -d '\n' | wc -c)" = 254 ]; ok "un texto de 600 caracteres se recorta a 254" $?
+[ "$(sql 'SELECT @@sql_mode;' | grep -c NO_BACKSLASH_ESCAPES)" = 0 ]; ok "sql_mode no tiene NO_BACKSLASH_ESCAPES (si lo tuviera, el escape con \\ dejaría de funcionar)" $?
+
 section "Editar (edit.php)"
 for q in "" "?id=abc" "?id%5B%5D=1" "?id=0" "?id=-3" "?id=9999" "?id=4294967296" "?id=%2B$U1" "?id=%20$U1" "?id=0$U1"; do
     chk "GET edit.php$q" 404 "$BASE/edit.php$q"
@@ -201,6 +244,7 @@ if [ "$WITH_DB_STOP" = 1 ]; then
     U2=$(id_of smoke-two@example.com)
     docker compose stop db >/dev/null 2>&1
     chk "GET /" 503 "$BASE/"
+    chk "GET /?q=zoe (una búsqueda)" 503 --get --data-urlencode "q=zoe" "$BASE/"
     chk "GET create.php" 200 "$BASE/create.php"
     chk "POST create.php" 503 -H "Origin: $ORIGIN" -d "name=Ana&last_name=Ruiz&email=smoke-y@example.com" "$BASE/create.php"
     chk "GET edit.php" 503 "$BASE/edit.php?id=$U2"

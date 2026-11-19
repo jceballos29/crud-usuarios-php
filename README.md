@@ -20,7 +20,8 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | MVP 5. Editar (Update) | Hecho |
 | MVP 6. Eliminar (Delete) | Hecho |
 | MVP 7. Revisión | Hecho (etiqueta `v1-crud-base`) |
-| Mejoras 1 a 8 | Pendientes |
+| Mejora 1. Búsqueda y filtros | Hecha (rama `mejora-1-busqueda`) |
+| Mejoras 2 a 8 | Pendientes |
 
 ## Qué se construye
 
@@ -149,6 +150,7 @@ crud-usuarios-docker/
     │   ├── helpers.php                  # environment(), escape(), log_exception()
     │   ├── user-validation.php          # Campos, limpieza y validación (compartido)
     │   ├── origin.php                   # Funciones puras: comprueban Origin/Referer contra APP_ORIGIN
+    │   ├── user-search.php              # Funciones puras de la búsqueda (término, patrón LIKE, consulta)
     │   ├── request-guard.php            # reject_foreign_origin(): el 403 de create, edit y delete
     │   ├── DatabaseConnectionException.php
     │   ├── layout/                      # header.php, footer.php
@@ -179,6 +181,17 @@ Los POST de `create.php`, `edit.php` y `delete.php` solo se aceptan si vienen de
 - **Si existe `status.php`**, que enseña versiones: solo en `local`.
 
 Tras cambiar `APP_ENV` en `.env`, recrea el contenedor con `docker compose up -d`. En `local` un error fatal se muestra en pantalla (y PHP responde 200: así se comporta con `display_errors` activo); en producción responde 500 sin cuerpo y el detalle queda en `docker compose logs php`.
+
+## Búsqueda
+
+El listado tiene un buscador: `index.php?q=texto`. Es una petición **GET**, así que la URL se puede copiar, compartir y recargar.
+
+- **Qué busca:** en nombre, apellido, nombre completo (`Laura Gómez`), correo y teléfono.
+- **Mayúsculas y tildes se ignoran:** `gomez`, `GÓMEZ` y `Gómez` encuentran lo mismo. Lo decide la collation de la tabla (`utf8mb4_unicode_ci`), no PHP.
+- **Los espacios repetidos se juntan** (`laura   gomez` equivale a `laura gomez`), el texto se recorta a 254 caracteres y lo que no sea texto (`?q[]=x`) cuenta como "sin búsqueda".
+- **`%`, `_` y `\` se buscan tal cual:** en `LIKE` son comodines, y `includes/user-search.php` los escapa para que `100%` encuentre `100%` y no todo. Esto exige que `sql_mode` de MySQL no incluya `NO_BACKSLASH_ESCAPES` (por defecto no lo incluye; `tests/smoke.sh` lo comprueba).
+- **Sin resultados** responde **200** con el mensaje "No se encontraron resultados para «…»": la búsqueda se completó, simplemente no hay filas.
+- **Límite conocido:** tras crear, editar o eliminar desde una búsqueda se vuelve al listado completo (el filtro no se conserva). Una consulta `LIKE '%texto%'` no puede usar un índice y recorre la tabla: sin problema con cientos de usuarios, y la paginación (mejora 2) es la respuesta cuando crezca.
 
 ## Ediciones simultáneas
 
