@@ -3,9 +3,12 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/helpers.php';
+require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/user-validation.php'; // user_roles(): etiqueta del rol en el listado
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
+
+$currentAdmin = require_login(); // sin sesión: 302 a login.php, antes de cualquier consulta o salida
 
 $pageTitle = "Inicio";
 $users = [];

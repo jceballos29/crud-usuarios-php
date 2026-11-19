@@ -27,7 +27,7 @@ FAIL=0
 
 # --default-character-set=utf8mb4: el cliente mysql de la consola habla latin1 por defecto y mostraría las tildes rotas.
 sql() { printf '%s\n' "$1" | docker compose exec -T db sh -c 'mysql -N --default-character-set=utf8mb4 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' 2>/dev/null; }
-cleanup() { sql "RENAME TABLE users_tmp TO users;" >/dev/null 2>&1; sql "DELETE FROM users WHERE email LIKE 'smoke-%@example.com';" >/dev/null 2>&1; rm -rf "$TMP"; }
+cleanup() { sql "RENAME TABLE users_tmp TO users;" >/dev/null 2>&1; sql "DELETE FROM users WHERE email LIKE 'smoke-%@example.com';" >/dev/null 2>&1; sql "DELETE FROM admins WHERE email LIKE 'smoke-%@example.com';" >/dev/null 2>&1; rm -rf "$TMP"; }
 trap cleanup EXIT
 
 section() { printf '\n== %s\n' "$1"; }
@@ -43,6 +43,10 @@ chk() {
     if [ "$code" = "$expected" ]; then pass "$desc -> $code"; else fail "$desc -> esperado $expected, obtenido $code"; fi
 }
 header_of() { grep -i "^$1:" "$TMP/head" | tr -d '\r' | head -1; }
+# Desde M5 todo está detrás del login: curl() lleva la sesión del administrador de prueba (la cookie está en
+# $JAR). Las pruebas de un visitante anónimo usan "command curl" (anon/achk, más abajo).
+JAR="$TMP/jar"
+curl() { command curl -b "$JAR" "$@"; }
 id_of() { sql "SELECT id FROM users WHERE email='$1';"; }
 exists() { [ "$(sql "SELECT COUNT(*) FROM users WHERE id=$1;")" = 1 ]; }
 # Con borrado lógico (M4) "eliminado" ya no es "la fila no existe": es la fila con active = 0.
@@ -56,14 +60,159 @@ wait_db() {
 }
 
 # ---------------------------------------------------------------------------------------------
-if [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/")" != 200 ]; then
+if [ "$(command curl -s -o /dev/null -w '%{http_code}' "$BASE/login.php")" != 200 ]; then
     echo "La aplicación no responde en $BASE. ¿Está levantada (docker compose up -d)?" >&2
     exit 2
 fi
 sql "SELECT 1;" >/dev/null || { echo "No se puede consultar la base de datos con docker compose exec." >&2; exit 2; }
 sql "DELETE FROM users WHERE email LIKE 'smoke-%@example.com';" >/dev/null
+sql "DELETE FROM admins WHERE email LIKE 'smoke-%@example.com';" >/dev/null
+# Un administrador de prueba con una contraseña al azar (solo existe durante la prueba), por la entrada estándar.
+ADMIN_PW="smoke-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+printf '%s\n' "$ADMIN_PW" | docker compose exec -T php php scripts/create-admin.php smoke-admin@example.com >/dev/null 2>&1 \
+    || { echo "No se pudo crear el administrador de prueba (¿está aplicada la migración 003?)." >&2; exit 2; }
+command curl -s -o /dev/null -c "$JAR" -H "Origin: $ORIGIN" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/")" = 200 ] || { echo "No se pudo iniciar sesión con el administrador de prueba." >&2; exit 2; }
 USERS_BEFORE=$(sql 'SELECT COUNT(*) FROM users;')
 echo "Pruebas contra $BASE (origen $ORIGIN); usuarios al empezar: $USERS_BEFORE"
+
+section "Inicio de sesión (M5): sin sesión no se entra a nada"
+anon() { command curl "$@"; }   # sin cookies: un visitante anónimo (curl() de arriba lleva la sesión del administrador)
+achk() {                         # como chk(), pero anónimo
+    local desc="$1" expected="$2"; shift 2
+    local code
+    code=$(command curl -s -o "$TMP/body" -D "$TMP/head" -w '%{http_code}' "$@")
+    if [ "$code" = "$expected" ]; then pass "$desc -> $code"; else fail "$desc -> esperado $expected, obtenido $code"; fi
+}
+USER_ANON=$(sql "INSERT INTO users (name, last_name, email) VALUES ('Anon', 'Prueba', 'smoke-anon@example.com'); SELECT id FROM users WHERE email='smoke-anon@example.com';")
+for path in "" "?view=inactive" "?q=laura&page=2" "create.php" "edit.php?id=$USER_ANON" "edit.php?id=abc"; do
+    achk "GET /$path sin sesión" 302 "$BASE/$path"
+    [ "$(header_of location)" = "Location: login.php" ]; ok "...redirige a login.php" $?
+    [ ! -s "$TMP/body" ] || ! grep -qE 'smoke-anon|<table|Lista de Usuarios' "$TMP/body"; ok "...y no filtra nada del listado" $?
+done
+achk "POST create.php sin sesión" 302 -H "Origin: $ORIGIN" -d "role=user&name=Hack&last_name=Anon&email=smoke-hack@example.com" "$BASE/create.php"
+[ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-hack@example.com';")" = 0 ]; ok "...no creó nada" $?
+achk "POST edit.php sin sesión" 302 -H "Origin: $ORIGIN" -d "role=user&id=$USER_ANON&name=Hack&last_name=Hack&email=smoke-anon@example.com" "$BASE/edit.php"
+[ "$(sql "SELECT name FROM users WHERE id=$USER_ANON;")" = Anon ]; ok "...no modificó nada" $?
+achk "POST delete.php sin sesión" 302 -H "Origin: $ORIGIN" -d "id=$USER_ANON" "$BASE/delete.php"
+[ "$(header_of location)" = "Location: login.php" ]; ok "...redirige a login.php" $?
+is_active "$USER_ANON"; ok "...y NO eliminó al usuario" $?
+sql "UPDATE users SET active=0 WHERE id=$USER_ANON;" >/dev/null
+achk "POST restore.php sin sesión" 302 -H "Origin: $ORIGIN" -d "id=$USER_ANON" "$BASE/restore.php"
+soft_deleted "$USER_ANON"; ok "...y NO restauró al usuario" $?
+achk "POST delete.php sin sesión y con origen ajeno (el 403 va antes que el login)" 403 -H "Origin: http://evil.example" -d "id=$USER_ANON" "$BASE/delete.php"
+achk "GET delete.php sin sesión (405 antes que el login)" 405 "$BASE/delete.php?id=$USER_ANON"
+achk "GET login.php" 200 "$BASE/login.php"
+[ "$(header_of cache-control)" = "Cache-Control: no-store" ]; ok "el formulario de entrada no se guarda en caché (no-store)" $?
+tr -d '\n' < "$TMP/body" | grep -qE 'type="password"[^>]*autocomplete="current-password"|autocomplete="current-password"[^>]*type="password"|type="password"\s+class="form-control"\s+id="password"\s+name="password"\s+autocomplete="current-password"'; ok "la contraseña es un campo type=password con autocomplete=current-password" $?
+[ -z "$(header_of set-cookie)" ]; ok "un visitante anónimo NO recibe cookie ni sesión (no se crea nada en el servidor)" $?
+
+section "Inicio de sesión (M5): credenciales"
+login_body() { printf 'email=%s&password=%s' "$1" "$2"; }
+achk "correo inexistente" 401 -H "Origin: $ORIGIN" --data-urlencode "email=nadie-smoke@example.com" --data-urlencode "password=cualquier-cosa-123" "$BASE/login.php"
+cp "$TMP/body" "$TMP/unknown.html"
+achk "contraseña incorrecta" 401 -H "Origin: $ORIGIN" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=cualquier-cosa-123" "$BASE/login.php"
+cp "$TMP/body" "$TMP/wrong.html"
+grep -qF 'Credenciales inválidas.' "$TMP/unknown.html" && grep -qF 'Credenciales inválidas.' "$TMP/wrong.html"; ok "los dos dicen «Credenciales inválidas.»" $?
+[ "$(sed -E 's/value="[^"]*"//g' "$TMP/unknown.html")" = "$(sed -E 's/value="[^"]*"//g' "$TMP/wrong.html")" ]; ok "...y las dos páginas son IDÉNTICAS (salvo el correo escrito): no se puede distinguir cuál falló" $?
+! grep -q 'cualquier-cosa-123' "$TMP/wrong.html"; ok "la contraseña escrita nunca se vuelve a pintar" $?
+tr -d '\n' < "$TMP/wrong.html" | grep -qF 'value="smoke-admin@example.com"'; ok "el correo sí se conserva para no reescribirlo" $?
+[ -z "$(sed -nE 's/^[Ss]et-[Cc]ookie:.*/x/p' "$TMP/head")" ]; ok "un login fallido no entrega cookie de sesión" $?
+achk "correo con otra capitalización y espacios, contraseña mala" 401 -H "Origin: $ORIGIN" --data-urlencode "email= SMOKE-Admin@Example.com " --data-urlencode "password=mala-mala-mala" "$BASE/login.php"
+achk "correo y contraseña vacíos" 422 -H "Origin: $ORIGIN" -d "email=&password=" "$BASE/login.php"
+achk "sin contraseña" 422 -H "Origin: $ORIGIN" -d "email=smoke-admin@example.com" "$BASE/login.php"
+achk "email como arreglo" 422 -H "Origin: $ORIGIN" -d "email[]=x&password=abc" "$BASE/login.php"
+achk "password como arreglo" 422 -H "Origin: $ORIGIN" -d "email=smoke-admin@example.com&password[]=abc" "$BASE/login.php"
+achk "inyección SQL en el correo" 401 -H "Origin: $ORIGIN" --data-urlencode "email=' OR '1'='1' -- " --data-urlencode "password=x" "$BASE/login.php"
+achk "la clave correcta seguida de un NUL y basura (bcrypt lee hasta el NUL)" 401 -H "Origin: $ORIGIN" -d "email=smoke-admin@example.com&password=${ADMIN_PW}%00cualquier-cosa" "$BASE/login.php"
+achk "una contraseña de 100.000 caracteres" 401 -H "Origin: $ORIGIN" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$(head -c 100000 /dev/zero | tr '\0' 'a')" "$BASE/login.php"
+achk "login sin Origin ni Referer" 403 --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
+achk "login con Origin ajeno (con la clave CORRECTA)" 403 -H "Origin: http://evil.example" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
+[ -z "$(sed -nE 's/^[Ss]et-[Cc]ookie:.*/x/p' "$TMP/head")" ]; ok "...y no inicia ninguna sesión" $?
+[ "$(sql "SELECT COUNT(*) FROM admins WHERE email='smoke-admin@example.com' AND password_hash LIKE '\$2y\$%' AND INSTR(password_hash, '$ADMIN_PW') = 0;")" = 1 ]; ok "en la BD hay un hash bcrypt (\$2y\$), no la contraseña" $?
+
+section "Inicio de sesión (M5): entrar, la cookie y la fijación de sesión"
+J2="$TMP/jar2"
+achk "login correcto (correo en mayúsculas)" 302 -c "$J2" -H "Origin: $ORIGIN" --data-urlencode "email=SMOKE-ADMIN@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
+[ "$(header_of location)" = "Location: index.php" ]; ok "redirige a index.php" $?
+COOKIE_LINE=$(grep -i '^set-cookie: crud_session=' "$TMP/head" | tr -d '\r')
+[ -n "$COOKIE_LINE" ]; ok "entrega la cookie crud_session (no el PHPSESSID por defecto)" $?
+printf '%s' "$COOKIE_LINE" | grep -qi 'HttpOnly'; ok "...HttpOnly (JavaScript no la lee)" $?
+printf '%s' "$COOKIE_LINE" | grep -qi 'SameSite=Lax'; ok "...SameSite=Lax" $?
+! printf '%s' "$COOKIE_LINE" | grep -qi 'secure'; ok "...sin Secure (la aplicación va por http; con APP_ORIGIN https se activaría)" $?
+! printf '%s' "$COOKIE_LINE" | grep -qiE 'expires|max-age'; ok "...cookie de sesión: sin fecha de caducidad (se va al cerrar el navegador)" $?
+printf '%s' "$COOKIE_LINE" | grep -qE 'crud_session=[0-9a-z,-]{20,}'; ok "...con un identificador largo" $?
+! grep -qi 'phpsessid' "$TMP/head"; ok "no aparece PHPSESSID" $?
+SID=$(awk '$6=="crud_session"{print $7}' "$J2")
+achk "con la sesión: GET /" 200 -b "$J2" "$BASE/"
+grep -qF 'Conectado como <strong>smoke-admin@example.com</strong>' "$TMP/body"; ok "el encabezado dice quién está conectado" $?
+tr -d '\n' < "$TMP/body" | grep -qE '<form method="post" action="logout.php"[^>]*>.*Cerrar sesión'; ok "...y ofrece «Cerrar sesión» como formulario POST" $?
+[ "$(header_of cache-control)" = "Cache-Control: no-store" ]; ok "las páginas protegidas llevan Cache-Control: no-store (el botón «atrás» no las enseña tras salir)" $?
+achk "con la sesión: GET login.php" 302 -b "$J2" "$BASE/login.php"
+[ "$(header_of location)" = "Location: index.php" ]; ok "quien ya entró no ve el formulario: va a index.php" $?
+achk "el id de sesión en la URL no vale (?crud_session=...)" 302 "$BASE/?crud_session=$SID"
+achk "otra cookie con el mismo valor pero distinto nombre (PHPSESSID) no vale" 302 -b "PHPSESSID=$SID" "$BASE/"
+achk "un id de sesión inventado" 302 -b "crud_session=inventado1234567890inventado12" "$BASE/"
+[ "$(header_of location)" = "Location: login.php" ]; ok "...va a login.php" $?
+achk "fijación de sesión: se entra con un id elegido por el atacante" 302 -b "crud_session=atacante1234567890atacante1234" -H "Origin: $ORIGIN" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
+NEWSID=$(grep -i '^set-cookie: crud_session=' "$TMP/head" | sed -E 's/^[^=]*=([^;]*);.*/\1/' | tr -d '\r')
+[ -n "$NEWSID" ] && [ "$NEWSID" != "atacante1234567890atacante1234" ]; ok "el servidor entrega un id NUEVO (no adopta el elegido por el atacante)" $?
+achk "...y el id que el atacante conocía no sirve" 302 -b "crud_session=atacante1234567890atacante1234" "$BASE/"
+# El caso que de verdad exige session_regenerate_id(): un id que el servidor SÍ conoce (ya existe su archivo de
+# sesión, aunque esté vacío) y que el atacante hizo llegar a la víctima. El modo estricto lo acepta; lo que lo
+# neutraliza es que al entrar se cambie por otro.
+FIXED=fijadoexistente0123456789abcdef
+docker compose exec -T php sh -c "rm -f /tmp/sess_$FIXED; : > /tmp/sess_$FIXED"
+achk "fijación con un id que el servidor SÍ conoce: la víctima entra con él" 302 -b "crud_session=$FIXED" -H "Origin: $ORIGIN" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
+FIXSID=$(grep -i '^set-cookie: crud_session=' "$TMP/head" | sed -E 's/^[^=]*=([^;]*);.*/\1/' | tr -d '\r')
+[ -n "$FIXSID" ] && [ "$FIXSID" != "$FIXED" ]; ok "al entrar, el id cambia (session_regenerate_id): el servidor entrega otro" $?
+achk "...y el id que conocía el atacante ya no da acceso" 302 -b "crud_session=$FIXED" "$BASE/"
+[ "$(header_of location)" = "Location: login.php" ]; ok "...lo manda a login.php" $?
+achk "...mientras que el id nuevo sí" 200 -b "crud_session=$FIXSID" "$BASE/"
+[ "$(docker compose exec -T php sh -c "[ -e /tmp/sess_$FIXED ] && echo si || echo no" | tr -d '\r')" = no ]; ok "...y el archivo de sesión viejo se borró del servidor" $?
+
+section "Inicio de sesión (M5): cerrar sesión"
+achk "GET logout.php" 405 "$BASE/logout.php"
+[ "$(header_of allow)" = "Allow: POST" ]; ok "405 con Allow: POST (una imagen <img src=logout.php> no cierra sesiones)" $?
+achk "la sesión sigue viva tras el 405" 200 -b "$J2" "$BASE/"
+achk "POST logout con Origin ajeno" 403 -b "$J2" -H "Origin: http://evil.example" -X POST "$BASE/logout.php"
+achk "POST logout sin Origin" 403 -b "$J2" -X POST "$BASE/logout.php"
+achk "...la sesión sigue viva tras los 403" 200 -b "$J2" "$BASE/"
+cp "$J2" "$TMP/jar_before_logout"
+achk "POST logout" 302 -b "$J2" -c "$J2" -H "Origin: $ORIGIN" -X POST "$BASE/logout.php"
+[ "$(header_of location)" = "Location: login.php?msg=logged_out" ]; ok "redirige a login.php?msg=logged_out" $?
+grep -i '^set-cookie: crud_session=' "$TMP/head" | grep -qiE 'expires=Thu, 01 Jan 1970|Max-Age=0'; ok "borra la cookie del navegador (caducada en el pasado)" $?
+achk "con la cookie de ANTES de salir (sesión destruida en el servidor)" 302 -b "$TMP/jar_before_logout" "$BASE/"
+[ "$(header_of location)" = "Location: login.php" ]; ok "ya no vale: va a login.php" $?
+achk "POST delete con la cookie vieja" 302 -b "$TMP/jar_before_logout" -H "Origin: $ORIGIN" -d "id=$USER_ANON" "$BASE/delete.php"
+[ "$(header_of location)" = "Location: login.php" ]; ok "...tampoco permite eliminar" $?
+achk "el aviso de «Cerraste la sesión»" 200 "$BASE/login.php?msg=logged_out"
+grep -qF 'Cerraste la sesión.' "$TMP/body"; ok "se muestra en login.php" $?
+achk "cerrar sesión sin tener sesión" 302 -H "Origin: $ORIGIN" -X POST "$BASE/logout.php"
+[ "$(header_of location)" = "Location: login.php?msg=logged_out" ]; ok "es idempotente (no da error)" $?
+
+section "Inicio de sesión (M5): caducidad por inactividad"
+J3="$TMP/jar3"
+achk "login para la prueba de caducidad" 302 -c "$J3" -H "Origin: $ORIGIN" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
+SID3=$(awk '$6=="crud_session"{print $7}' "$J3")
+setseen() { docker compose exec -T php sh -c "sed -i -E 's/last_seen\\|i:[0-9]+/last_seen|i:$1/' /tmp/sess_$SID3"; }
+getseen() { docker compose exec -T php sh -c "sed -nE 's/.*last_seen\\|i:([0-9]+).*/\\1/p' /tmp/sess_$SID3" | tr -d '\r'; }
+NOW=$(date +%s)
+[ -n "$(getseen)" ]; ok "la sesión guarda la hora de la última actividad (archivo de sesión en el contenedor de PHP)" $?
+setseen $((NOW - 1700))
+achk "a los 28 minutos sin actividad (el límite son 30)" 200 -b "$J3" "$BASE/"
+[ "$(getseen)" -ge $((NOW - 5)) ]; ok "...sigue viva y la actividad se renueva" $?
+setseen $((NOW - 1805))
+achk "a los 30 minutos y 5 segundos sin actividad" 302 -b "$J3" "$BASE/"
+[ "$(header_of location)" = "Location: login.php?msg=expired" ]; ok "caducó: va a login.php?msg=expired" $?
+achk "...el aviso de caducidad" 200 "$BASE/login.php?msg=expired"
+grep -qF 'caducó por inactividad' "$TMP/body"; ok "se muestra en login.php" $?
+achk "...y la sesión caducada no se reaprovecha" 302 -b "$J3" "$BASE/"
+[ "$(header_of location)" = "Location: login.php" ]; ok "sigue yendo a login.php (ya sin el aviso)" $?
+achk "una sesión con la hora en el futuro tampoco es de fiar" 302 -c "$J3" -H "Origin: $ORIGIN" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
+SID3=$(awk '$6=="crud_session"{print $7}' "$J3")
+setseen $((NOW + 4000))
+achk "con last_seen en el futuro" 302 -b "$J3" "$BASE/"
 
 section "Páginas y cabeceras de seguridad"
 chk "GET /" 200 "$BASE/"
@@ -211,7 +360,7 @@ LINKS=$(tr -d '\n' < "$TMP/body" | grep -oE '<nav aria-label="Paginación.*</nav
 [ "$(printf '%s\n' "$LINKS" | grep -c .)" -ge 4 ] && ! printf '%s\n' "$LINKS" | grep -qv 'q=smoke-pag'; ok "TODOS los enlaces de la paginación conservan la búsqueda" $?
 chk "q con tildes y espacios, página 2" 200 --get --data-urlencode "q=smoke pag" --data-urlencode "page=2" "$BASE/"; ok "(el espacio de «smoke pag» no encuentra nada, pero no rompe)" 0
 chk "una sola página no pinta la navegación" 200 --get --data-urlencode "q=smoke-busq" "$BASE/"; ! grep -qF 'aria-label="Paginación' "$TMP/body"; ok "...la búsqueda de 5 resultados no tiene <nav>" $?
-chk "sin búsqueda: GET /" 200 "$BASE/"; TOTAL=$(sql 'SELECT COUNT(*) FROM users;'); PAGES=$(( (TOTAL + 9) / 10 ))
+chk "sin búsqueda: GET /" 200 "$BASE/"; TOTAL=$(sql 'SELECT COUNT(*) FROM users WHERE active=1;'); PAGES=$(( (TOTAL + 9) / 10 ))
 flat | grep -qF "Lista de Usuarios ($TOTAL)"; ok "el título cuenta TODOS los usuarios ($TOTAL), no los de la página" $?
 [ "$(rows)" = "$(( TOTAL < 10 ? TOTAL : 10 ))" ]; ok "...y la página 1 tiene $(( TOTAL < 10 ? TOTAL : 10 )) filas" $?
 chk "sin búsqueda: la última página ($PAGES)" 200 "$BASE/?page=$PAGES"; [ "$(rows)" = "$(( TOTAL - 10 * (PAGES - 1) ))" ]; ok "...tiene $(( TOTAL - 10 * (PAGES - 1) )) filas" $?
@@ -490,6 +639,8 @@ if [ "$WITH_DB_STOP" = 1 ]; then
     chk "GET /?q=zoe (una búsqueda)" 503 --get --data-urlencode "q=zoe" "$BASE/"
     chk "GET /?page=2 (una página)" 503 "$BASE/?page=2"
     chk "GET /?q=zoe&page=3 (búsqueda y página)" 503 --get --data-urlencode "q=zoe" --data-urlencode "page=3" "$BASE/"
+    achk "POST login.php con la BD parada" 503 -H "Origin: $ORIGIN" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
+    ! grep -qiE 'SQLSTATE|Access denied|getaddrinfo|/var/www' "$TMP/body"; ok "...sin detalles técnicos" $?
     chk "GET create.php" 200 "$BASE/create.php"
     chk "POST create.php" 503 -H "Origin: $ORIGIN" -d "role=user&name=Ana&last_name=Ruiz&email=smoke-y@example.com" "$BASE/create.php"
     chk "GET edit.php" 503 "$BASE/edit.php?id=$U2"

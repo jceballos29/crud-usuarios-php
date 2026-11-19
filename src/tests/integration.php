@@ -17,6 +17,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/connection.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/user-conflict.php';
+require_once __DIR__ . '/../includes/admin-auth.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
 require_once __DIR__ . '/harness.php';
@@ -217,6 +218,55 @@ section('Mejora 4: el índice (active, id) existe');
 // Con 31 filas el optimizador prefiere recorrer la clave primaria, así que EXPLAIN no demuestra nada aquí:
 // que el índice se USA con muchas filas se midió aparte con 200.000 (ver plan.md, M4). Esto solo vigila que exista.
 same('idx_active_id es un índice de (active, id)', ['active', 'id'], $pdo->query("SELECT COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_active_id' ORDER BY SEQ_IN_INDEX")->fetchAll(PDO::FETCH_COLUMN));
+
+section('Mejora 5: authenticate_admin() contra la tabla admins');
+$pdo->exec('CREATE TEMPORARY TABLE admins_itest LIKE admins');
+$pdo->exec('ALTER TABLE admins_itest RENAME TO admins');
+$secret = 'una-clave-de-prueba-123';
+$pdo->prepare('INSERT INTO admins (email, password_hash) VALUES (:e, :h)')->execute([':e' => 'root@example.com', ':h' => password_hash($secret, PASSWORD_DEFAULT)]);
+$adminId = (int) $pdo->query("SELECT id FROM admins WHERE email = 'root@example.com'")->fetchColumn();
+same('correo y contraseña correctos', ['id' => $adminId, 'email' => 'root@example.com'], authenticate_admin($pdo, 'root@example.com', $secret));
+same('el correo no distingue mayúsculas ni espacios alrededor', ['id' => $adminId, 'email' => 'root@example.com'], authenticate_admin($pdo, '  ROOT@Example.COM ', $secret));
+same('contraseña incorrecta', null, authenticate_admin($pdo, 'root@example.com', 'otra-clave-distinta'));
+same('la contraseña distingue mayúsculas', null, authenticate_admin($pdo, 'root@example.com', strtoupper($secret)));
+same('un espacio de más en la contraseña no se perdona (no se recorta)', null, authenticate_admin($pdo, 'root@example.com', $secret . ' '));
+same('contraseña vacía', null, authenticate_admin($pdo, 'root@example.com', ''));
+same('correo que no existe', null, authenticate_admin($pdo, 'nadie@example.com', $secret));
+same('correo vacío', null, authenticate_admin($pdo, '', $secret));
+same('la clave correcta con un NUL al final no entra', null, authenticate_admin($pdo, 'root@example.com', $secret . "\0"));
+same('una contraseña de 2000 bytes se rechaza sin hashearla ni dar error', null, authenticate_admin($pdo, 'root@example.com', str_repeat('a', 2000)));
+same('la clave correcta seguida de basura DESPUÉS de un NUL no entra (bcrypt lee hasta el NUL)', null, authenticate_admin($pdo, 'root@example.com', $secret . "\0cualquier-cosa"));
+same('la clave correcta con 72 bytes de sobra tampoco (bcrypt solo lee 72)', null, authenticate_admin($pdo, 'root@example.com', str_pad($secret, 80, 'x')));
+same('...y una contraseña de 72 bytes que SÍ es la guardada sí entra', ['id' => (int) $pdo->query("SELECT id FROM admins WHERE email = 'root@example.com'")->fetchColumn(), 'email' => 'root@example.com'], (function () use ($pdo): ?array {
+    $long = str_repeat('k', 72);
+    $pdo->prepare('UPDATE admins SET password_hash = :h WHERE email = :e')->execute([':h' => password_hash($long, PASSWORD_DEFAULT), ':e' => 'root@example.com']);
+    $result = authenticate_admin($pdo, 'root@example.com', $long);
+    $pdo->prepare('UPDATE admins SET password_hash = :h WHERE email = :e')->execute([':h' => password_hash('una-clave-de-prueba-123', PASSWORD_DEFAULT), ':e' => 'root@example.com']);
+
+    return $result;
+})());
+foreach (["' OR '1'='1", "root@example.com' -- ", "x' OR 1=1 -- ", '%', 'root@example.com%'] as $injection) {
+    same('«' . $injection . '» como correo no entra', null, authenticate_admin($pdo, $injection, $secret));
+}
+same('el hash guardado no es la contraseña ni la contiene', [true, false], [str_starts_with((string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn(), '$2y$'), str_contains((string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn(), $secret)]);
+
+$cheap = password_hash($secret, PASSWORD_BCRYPT, ['cost' => 4]);
+$pdo->prepare('UPDATE admins SET password_hash = :h WHERE id = :id')->execute([':h' => $cheap, ':id' => $adminId]);
+same('una contraseña correcta con un hash de coste 4 entra...', ['id' => $adminId, 'email' => 'root@example.com'], authenticate_admin($pdo, 'root@example.com', $secret));
+$after = (string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn();
+same('...y el hash se recalcula con el coste actual (password_needs_rehash)', [false, true], [password_needs_rehash($after, PASSWORD_DEFAULT), $after !== $cheap]);
+same('...y la contraseña sigue valiendo con el hash nuevo', true, password_verify($secret, $after));
+$pdo->prepare('UPDATE admins SET password_hash = :h WHERE id = :id')->execute([':h' => $cheap, ':id' => $adminId]);
+authenticate_admin($pdo, 'root@example.com', 'contraseña-incorrecta');
+same('una contraseña INCORRECTA no recalcula nada', $cheap, (string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn());
+$duplicate = null;
+try {
+    $pdo->prepare('INSERT INTO admins (email, password_hash) VALUES (:e, :h)')->execute([':e' => 'ROOT@example.com', ':h' => $cheap]);
+} catch (PDOException $error) {
+    $duplicate = $error->errorInfo[1] ?? null;
+}
+same('el correo del administrador es único (también con otra capitalización)', 1062, $duplicate);
+$pdo->exec('DROP TEMPORARY TABLE admins');
 
 section('Un texto hostil se trata como texto');
 foreach (["' OR '1'='1", "'; DROP TABLE users; --", '" OR 1=1 --', '%\' OR \'x\' LIKE \'%'] as $hostile) {

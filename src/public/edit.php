@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/request-guard.php';
+require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/user-conflict.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
@@ -20,6 +21,7 @@ $submitted = $_SERVER['REQUEST_METHOD'] === 'POST';
 if ($submitted) {
     reject_foreign_origin(); // 403 si el POST no viene del propio sitio, antes de mirar el id o lo que envía
 }
+$currentAdmin = require_login(); // después del origen: sin sesión, 302 a login.php antes de tocar la BD
 
 // Estado del listado al que se vuelve tras guardar o cancelar (búsqueda y página). Llega en la URL al
 // abrir el formulario y en campos ocultos al enviarlo, y se valida igual que en index.php. Son solo dos

@@ -19,6 +19,8 @@ require_once __DIR__ . '/../includes/origin.php';
 require_once __DIR__ . '/../includes/user-search.php';
 require_once __DIR__ . '/../includes/pagination.php';
 require_once __DIR__ . '/../includes/user-conflict.php';
+require_once __DIR__ . '/../includes/admin-auth.php';
+require_once __DIR__ . '/../includes/session.php';
 
 require_once __DIR__ . '/harness.php';
 
@@ -450,5 +452,53 @@ same('un campo desconocido no consulta nada (devuelve false sin tocar la BD)', f
 
     return conflicting_user_is_inactive($pdo, 'name; DROP TABLE users', 'x');
 })());
+
+section('Mejora 5: normalize_admin_email() y validate_new_admin()');
+same('recorta y pasa a minúsculas', 'ana@ejemplo.com', normalize_admin_email("  ANA@Ejemplo.COM \n"));
+same('un correo y una contraseña válidos', [], validate_new_admin('ana@ejemplo.com', 'una-clave-larga'));
+same('correo vacío', ['email' => 'El correo es obligatorio.'], validate_new_admin('', 'una-clave-larga'));
+same('correo sin arroba', ['email' => 'Ingresa un correo válido.'], validate_new_admin('ana.ejemplo.com', 'una-clave-larga'));
+same('correo de más de 254 caracteres', ['email' => 'El correo no debe superar los 254 caracteres.'], validate_new_admin(str_repeat('a', 250) . '@b.co', 'una-clave-larga'));
+same('contraseña de 9 caracteres: corta', ['password' => 'La contraseña debe tener al menos 10 caracteres.'], validate_new_admin('a@b.co', '123456789'));
+same('contraseña de 10 caracteres: válida', [], validate_new_admin('a@b.co', '1234567890'));
+same('los espacios cuentan como caracteres (no se recorta)', [], validate_new_admin('a@b.co', '          '));
+same('contraseña de exactamente 72 bytes: válida', [], validate_new_admin('a@b.co', str_repeat('x', 72)));
+same('contraseña de 73 bytes: se rechaza (bcrypt la truncaría)', ['password' => 'La contraseña no puede superar los 72 bytes (límite de bcrypt).'], validate_new_admin('a@b.co', str_repeat('x', 73)));
+same('36 letras "ñ" son 36 caracteres pero 72 bytes: válida', [], validate_new_admin('a@b.co', str_repeat('ñ', 36)));
+same('37 letras "ñ" son 74 bytes: se rechaza', true, isset(validate_new_admin('a@b.co', str_repeat('ñ', 37))['password']));
+same('con un byte NUL', true, isset(validate_new_admin('a@b.co', "clave-larga\0x")['password']));
+same('UTF-8 inválido', true, isset(validate_new_admin('a@b.co', "clave-larga-\xff\xfe")['password']));
+same('el error de contraseña no repite la contraseña', false, str_contains(implode('|', validate_new_admin('a@b.co', 'corta')), 'corta'));
+
+section('Mejora 5: DUMMY_PASSWORD_HASH (igualar el tiempo con y sin correo)');
+$info = password_get_info(DUMMY_PASSWORD_HASH);
+same('es un hash bcrypt válido', ['bcrypt', 60], [$info['algoName'], strlen(DUMMY_PASSWORD_HASH)]);
+same('tiene el MISMO coste que PASSWORD_DEFAULT hoy (si PHP lo sube, esta prueba avisa)', password_get_info(password_hash('x', PASSWORD_DEFAULT))['options']['cost'], $info['options']['cost']);
+same('no necesita rehash (si no, el dummy sería más barato que uno real)', false, password_needs_rehash(DUMMY_PASSWORD_HASH, PASSWORD_DEFAULT));
+same('no coincide con contraseñas comunes', [false, false, false], [password_verify('', DUMMY_PASSWORD_HASH), password_verify('password', DUMMY_PASSWORD_HASH), password_verify('admin', DUMMY_PASSWORD_HASH)]);
+same('el mensaje de login fallido es uno solo y no menciona el correo', ['Credenciales inválidas.', false], [LOGIN_FAILED_MESSAGE, stripos(LOGIN_FAILED_MESSAGE, 'correo') !== false]);
+
+section('Mejora 5: opciones de la cookie de sesión');
+$o = session_cookie_options(false);
+same('httponly (JavaScript no la lee)', true, $o['httponly']);
+same('samesite Lax', 'Lax', $o['samesite']);
+same('cookie de sesión: sin lifetime (desaparece al cerrar el navegador)', 0, $o['lifetime']);
+same('path / y sin domain (solo este host)', ['/', ''], [$o['path'], $o['domain']]);
+same('sin HTTPS, secure apagado (el navegador no guardaría una cookie secure en http)', false, $o['secure']);
+same('con HTTPS, secure encendido', true, session_cookie_options(true)['secure']);
+same('el nombre no es el PHPSESSID por defecto', true, SESSION_NAME !== 'PHPSESSID');
+
+section('Mejora 5: session_is_expired()');
+$now = 1_700_000_000;
+same('activa hace un instante', false, session_is_expired($now - 1, $now));
+same('1 segundo antes del límite', false, session_is_expired($now - (SESSION_IDLE_TIMEOUT - 1), $now));
+same('justo en el límite caduca', true, session_is_expired($now - SESSION_IDLE_TIMEOUT, $now));
+same('pasado el límite', true, session_is_expired($now - SESSION_IDLE_TIMEOUT - 1, $now));
+same('una marca del futuro no es de fiar', true, session_is_expired($now + 5, $now));
+same('sin marca (null)', true, session_is_expired(null, $now));
+same('una marca que es texto no vale (solo enteros)', true, session_is_expired((string) ($now - 1), $now));
+same('un decimal no vale', true, session_is_expired((float) ($now - 1), $now));
+same('con otro tiempo límite (60 s)', [false, true], [session_is_expired($now - 59, $now, 60), session_is_expired($now - 60, $now, 60)]);
+same('el límite son 30 minutos', 1800, SESSION_IDLE_TIMEOUT);
 
 finish();

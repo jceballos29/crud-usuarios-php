@@ -22,3 +22,15 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE KEY unique_document (document),
     KEY idx_active_id (active, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Mejora 5 (misma definicion que database/migrations/003-admins.sql: mantener ambos).
+-- Administradores que inician sesion. Aparte de `users`. Se crean con src/scripts/create-admin.php.
+CREATE TABLE IF NOT EXISTS admins (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    email VARCHAR(254) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY unique_admin_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

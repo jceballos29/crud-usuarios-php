@@ -24,7 +24,8 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | Mejora 2. Paginación | Hecha (rama `mejora-2-paginacion`) |
 | Mejora 3. Más campos (documento, nacimiento, rol) | Hecha (rama `mejora-3-mas-campos`) |
 | Mejora 4. Borrado lógico | Hecha (rama `mejora-4-borrado-logico`) |
-| Mejoras 5 a 8 | Pendientes |
+| Mejora 5. Inicio de sesión | Hecha (rama `mejora-5-login`) |
+| Mejoras 6 a 8 | Pendientes |
 
 ## Qué se construye
 
@@ -96,6 +97,8 @@ docker compose up -d --build
 docker compose ps        # los 4 servicios en running; db en healthy
 ```
 
+- **Entrar:** http://localhost:8080/login.php. Una instalación nueva trae un administrador de **desarrollo** (`database/02-seed.sql`): correo `admin@example.com`, contraseña `Admin-Demo-2026`. Es una cuenta de demostración con una clave conocida: bórrala fuera de tu máquina (`DELETE FROM admins WHERE email = 'admin@example.com'`).
+- **Crear tu propio administrador:** `docker compose exec php php scripts/create-admin.php correo@ejemplo.com` (pide la contraseña, de 10 a 72 bytes, sin mostrarla). En una BD que ya existía, aplica antes la migración `003-admins.sql`; el administrador de desarrollo no se crea solo (el seed solo corre con el volumen vacío): para añadirlo, ejecuta a mano su `INSERT IGNORE` de `database/02-seed.sql`.
 - Diagnóstico del stack: http://localhost:8080/status.php (solo con `APP_ENV=local`; en cualquier otro entorno responde 404 para no revelar versiones)
 - Adminer: http://localhost:8081 (sistema MySQL, servidor `db`, credenciales de `.env`)
 
@@ -123,7 +126,7 @@ Hay cuatro niveles y no necesitan instalar nada más que lo que ya usa el proyec
 
 - **Unitarias** (`src/tests/unit.php`): las funciones puras (validación, id, origen, fechas, escape, búsqueda, paginación). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
 - **De integración** (`src/tests/integration.php`): las consultas de búsqueda y paginación contra MySQL, sobre una tabla temporal que no toca tus datos. `docker compose exec php php tests/integration.php`.
-- **De las migraciones** (`tests/migration-001.sh` y `tests/migration-002.sh`): aplican `database/migrations/` a una BD temporal con el esquema anterior y comprueban que acaba igual que una instalación nueva. Usan root y borran sus bases temporales.
+- **De las migraciones** (`tests/migration-001.sh`, `-002.sh` y `-003.sh`): aplican `database/migrations/` a una BD temporal con el esquema anterior y comprueban que acaba igual que una instalación nueva. Usan root y borran sus bases temporales.
 - **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, origen en los tres POST, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
 
 Ambos terminan con código 0 si todo pasa y con 1 si algo falla, así que sirven también para automatizarlos. Si cambias el puerto o el origen, usa `BASE_URL` y `ORIGIN`.
@@ -140,10 +143,11 @@ crud-usuarios-docker/
 ├── tests/
 │   ├── smoke.sh             # Pruebas de punta a punta con curl
 │   ├── migration-001.sh     # Prueba de la migración 001 con bases temporales
-│   └── migration-002.sh     # Prueba de la migración 002
+│   ├── migration-002.sh     # Prueba de la migración 002
+│   └── migration-003.sh     # Prueba de la migración 003
 ├── database/
 │   ├── 01-schema.sql        # Tabla users (instalación nueva)
-│   ├── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql, 002-active.sql)
+│   ├── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql, 002-active.sql, 003-admins.sql)
 │   └── 02-seed.sql          # SET NAMES utf8mb4 + 3 usuarios de prueba
 └── src/                     # Montado en /var/www/html
     ├── public/              # Raíz web: lo único que ve el navegador
@@ -151,6 +155,8 @@ crud-usuarios-docker/
     │   ├── create.php       # Alta de usuarios (MVP 4)
     │   ├── edit.php         # Edición de usuarios (MVP 5)
     │   ├── delete.php       # Eliminar (borrado lógico), solo POST y solo desde el propio sitio (MVP 6, M4)
+    │   ├── login.php        # Formulario y proceso de inicio de sesión (M5)
+    │   ├── logout.php       # Cierra la sesión, solo POST (M5)
     │   ├── restore.php      # Restaurar a un eliminado, solo POST y solo desde el propio sitio (M4)
     │   ├── status.php       # Diagnóstico del stack (solo APP_ENV=local)
     │   └── js/confirm-submit.js   # Pide confirmación en los formularios con data-confirm
@@ -161,6 +167,8 @@ crud-usuarios-docker/
     │   ├── origin.php                   # Funciones puras: comprueban Origin/Referer contra APP_ORIGIN
     │   ├── user-search.php              # Funciones puras de la búsqueda (término, patrón LIKE, consultas de listado y recuento)
     │   ├── pagination.php               # Funciones puras de la paginación (página, rango, enlaces, URL del listado)
+    │   ├── admin-auth.php               # Credenciales de administrador: validar, normalizar y authenticate_admin() (M5)
+    │   ├── session.php                  # Sesión: cookie, caducidad, require_login() (M5)
     │   ├── user-conflict.php            # ¿El dueño de un correo/documento duplicado está eliminado? (avisos de M4)
     │   ├── request-guard.php            # reject_foreign_origin(): el 403 de create, edit, delete y restore
     │   ├── DatabaseConnectionException.php
@@ -169,6 +177,7 @@ crud-usuarios-docker/
     ├── tests/               # unit.php, integration.php y harness.php (común); fuera de public/
     └── scripts/             # Solo consola
         ├── db-check.php
+        ├── create-admin.php  # Crea un administrador (M5)
         ├── seed-demo.php   # Inserta/borra usuarios de demostración (demo-NNN@example.com)
         └── info.php
 ```
@@ -177,7 +186,7 @@ Estructura objetivo al terminar el CRUD base: ver el Anexo E de [`plan.md`](plan
 
 ## Origen de la aplicación (`APP_ORIGIN`)
 
-Los POST de `create.php`, `edit.php`, `delete.php` y `restore.php` solo se aceptan si vienen del propio sitio: `reject_foreign_origin()` (en `includes/request-guard.php`) compara la cabecera `Origin` (o, si falta, `Referer`) con `APP_ORIGIN` y responde **403** si no coincide, si falta o si es `null`, **antes** de mirar lo que se envía (ni siquiera se valida el id ni los campos). Es una capa contra peticiones enviadas desde otras páginas; no sustituye al token CSRF del módulo M6. Los GET no se comprueban.
+Los POST de `login.php`, `logout.php`, `create.php`, `edit.php`, `delete.php` y `restore.php` solo se aceptan si vienen del propio sitio: `reject_foreign_origin()` (en `includes/request-guard.php`) compara la cabecera `Origin` (o, si falta, `Referer`) con `APP_ORIGIN` y responde **403** si no coincide, si falta o si es `null`, **antes** de mirar lo que se envía (ni siquiera se valida el id ni los campos). Es una capa contra peticiones enviadas desde otras páginas; no sustituye al token CSRF del módulo M6. Los GET no se comprueban.
 
 - `APP_ORIGIN` es el origen público de la aplicación: **esquema + host + puerto**, sin ruta (`http://localhost:8080`, `https://sitio.com`).
 - Es opcional: por defecto se deriva de `APP_PORT` (`http://localhost:${APP_PORT}`). Fíjalo en `.env` si usas otro host o HTTPS.
@@ -224,6 +233,18 @@ Cada usuario tiene tres campos más (mejora 3): `document`, `birth_date` y `role
 - **Rol:** obligatorio, uno de `user` (Usuario, el valor por defecto), `editor` o `admin`. Solo una **etiqueta**: no da ningún permiso hasta el inicio de sesión (mejora 5). La lista válida está en `user_roles()` y debe coincidir con el `ENUM` de la BD (una prueba de integración lo comprueba).
 - **Migración:** una BD que ya tiene datos recibe las columnas con `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/migrations/001-more-fields.sql`. Se aplica **una sola vez** (la segunda falla sin cambiar nada). Los usuarios existentes quedan con documento y fecha vacíos y rol `user`. Una instalación nueva ya trae las columnas por `01-schema.sql`: hay que mantener las dos cosas a la vez.
 - **Los envíos sin `role`** (por ejemplo con `curl`, como antes de esta mejora) responden 422.
+
+## Inicio de sesión
+
+Toda la aplicación (listado, alta, edición, eliminar, restaurar) exige haber iniciado sesión; `login.php` y `logout.php` son lo único público.
+
+- **Administradores:** tabla `admins` (aparte de `users`), con el **hash bcrypt** de la contraseña, nunca la contraseña. Se crean solo desde la consola (`scripts/create-admin.php`); no hay registro público.
+- **Sin sesión:** cualquier página protegida responde **302 a `login.php`**, y un POST sin sesión (`delete.php`, `restore.php`...) **no cambia nada**. El orden es: método (405), origen (403), sesión (302), id (400), BD.
+- **Login:** «Credenciales inválidas.» (401) sea cual sea el fallo, y también tarda lo mismo (con un correo inexistente se calcula igualmente un hash ficticio), para no revelar qué correos existen. El POST comprueba el origen (si no, otro sitio podría iniciar su sesión en tu navegador).
+- **Sesión:** cookie `crud_session` con `HttpOnly` y `SameSite=Lax` (y `Secure` si `APP_ORIGIN` es `https://`); el id cambia al entrar (fijación de sesión). Caduca a los **30 minutos de inactividad** (cada petición lo renueva). El estado está en un archivo dentro del contenedor `php`: recrearlo cierra todas las sesiones.
+- **Cerrar sesión:** botón en el encabezado, es un POST (`logout.php`). Las páginas protegidas llevan `Cache-Control: no-store`.
+- **Límites:** sin límite de intentos fallidos (el diseño está en `plan.md`), sin cambio de contraseña, sin token CSRF (mejora 6), y sin HTTPS la contraseña viaja en claro. El rol de `users` no concede permisos. `status.php` y Adminer no pasan por este login.
+- **Contraseñas:** de 10 a 72 bytes (bcrypt solo lee 72 y se corta en un byte NUL: se rechazan en vez de truncarlas).
 
 ## Borrado lógico y usuarios eliminados
 

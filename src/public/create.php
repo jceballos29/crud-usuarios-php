@@ -5,7 +5,14 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/helpers.php';
 require_once __DIR__ . '/../includes/user-validation.php';
 require_once __DIR__ . '/../includes/request-guard.php';
+require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/user-conflict.php';
+
+// Orden: origen (403) -> sesión (302 a login.php) -> lo demás. Primero «¿quién pide?», después «¿qué pide?».
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    reject_foreign_origin();
+}
+$currentAdmin = require_login();
 
 $pageTitle = "Registrar";
 
@@ -16,8 +23,6 @@ $errorMessage = null; // error general (BD, configuración...)
 $submitted = $_SERVER['REQUEST_METHOD'] === 'POST';
 
 if ($submitted) {
-    reject_foreign_origin(); // 403 si el POST no viene del propio sitio, antes de mirar lo que envía
-
     $data = read_user_input($_POST, $fields);
     $errors = validate_user($data, $fields);
 

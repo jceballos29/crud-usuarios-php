@@ -23,6 +23,13 @@ $title = "Gestión de usuarios | " . $page;
         <nav class="navbar bg-2 fg-2">
             <div class="container">
                 <a class="navbar-brand" href="index.php">Gestión de usuarios</a>
+                <?php if (($currentAdmin ?? null) !== null): ?>
+                    <?php /* Quién está conectado y cómo salir. Cerrar sesión es un POST (ver logout.php). */ ?>
+                    <form method="post" action="logout.php" class="d-flex align-items-center gap-2">
+                        <span>Conectado como <strong><?= escape($currentAdmin['email']) ?></strong></span>
+                        <button type="submit" class="btn-outline">Cerrar sesión</button>
+                    </form>
+                <?php endif; ?>
             </div>
         </nav>
     </header>
