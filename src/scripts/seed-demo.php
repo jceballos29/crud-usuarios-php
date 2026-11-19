@@ -19,7 +19,11 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 
-require_once __DIR__ . '/../includes/connection.php';
+require_once __DIR__ . '/../bootstrap.php';
+
+// Script de consola de mantenimiento: puede hablar con la BD directamente (la regla «solo el repositorio conoce
+// SQL» es para las páginas web; ver src/tests/architecture.php).
+$pdo = App\Database\Connection::create();
 
 $arg = $argv[1] ?? '35';
 

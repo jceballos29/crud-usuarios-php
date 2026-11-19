@@ -17,15 +17,23 @@ declare(strict_types=1);
  * Sale con 0 si todo pasa y con 1 si algo falla.
  */
 
-require_once __DIR__ . '/../includes/connection.php';
-require_once __DIR__ . '/../includes/user-validation.php';
-require_once __DIR__ . '/../includes/user-conflict.php';
-require_once __DIR__ . '/../includes/admin-auth.php';
-require_once __DIR__ . '/../includes/user-search.php';
-require_once __DIR__ . '/../includes/pagination.php';
+require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/harness.php';
 
-/** @var PDO $pdo */
+use App\Auth\AdminAuth;
+use App\Database\Connection;
+use App\Domain\User;
+use App\Exceptions\DuplicateUserException;
+use App\Http\Pagination;
+use App\Repository\AdminRepository;
+use App\Repository\UserRepository;
+use App\Search\UserSearch;
+use App\Validation\UserValidator;
+
+$pdo = Connection::create();
+$repo = new UserRepository($pdo);
+$admins = new AdminRepository($pdo);
+$validator = new UserValidator();
 $realUsers = (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
 // Se copia la estructura de la real (índice UNIQUE incluido, así no puede desfasarse) a una temporal con
 // otro nombre, y se renombra a `users`: una tabla temporal con el mismo nombre oculta a la real en esta
@@ -51,25 +59,17 @@ $pdo->exec("UPDATE users SET document = 'ZX-998877' WHERE email = 'itest-zoe@exa
 $total = count($rows); // 31
 
 /**
- * Ejecuta una página del listado igual que lo hace index.php y devuelve los ids.
+ * Ejecuta una página del listado igual que lo hace el controlador (UserRepository) y devuelve los ids.
  *
  * @return array{ids: list<int>, total: int, pagination: array<string, int>}
  */
-function fetchPage(PDO $pdo, string $term, int $requestedPage, bool $active = true): array
+function fetchPage(UserRepository $repo, string $term, int $requestedPage, bool $active = true): array
 {
-    [$countSql, $countParams] = user_count_query($term, $active);
-    $stmt = $pdo->prepare($countSql);
-    bind_all($stmt, $countParams);
-    $stmt->execute();
-    $count = (int) $stmt->fetchColumn();
+    $count = $repo->count($term, $active);
+    $pagination = Pagination::paginate($count, $requestedPage);
+    $users = $repo->page($term, $active, $pagination['perPage'], $pagination['offset']);
 
-    $pagination = paginate($count, $requestedPage);
-    [$sql, $params] = user_list_query($term, $pagination['perPage'], $pagination['offset'], $active);
-    $stmt = $pdo->prepare($sql);
-    bind_all($stmt, $params);
-    $stmt->execute();
-
-    return ['ids' => array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), 'total' => $count, 'pagination' => $pagination];
+    return ['ids' => array_map(static fn(User $user): int => $user->id, $users), 'total' => $count, 'pagination' => $pagination];
 }
 
 section('La tabla temporal aísla las pruebas de los datos reales');
@@ -87,15 +87,15 @@ section('LIMIT y OFFSET: la trampa del plan, en los dos modos de PDO');
 foreach ([[false, 'nativas (EMULATE_PREPARES=false, la configuración del proyecto)'], [true, 'emuladas (EMULATE_PREPARES=true)']] as [$emulate, $label]) {
     $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, $emulate);
     try {
-        $page = fetchPage($pdo, 'itest-', 2);
+        $page = fetchPage($repo, 'itest-', 2);
     } catch (PDOException $error) {
-        same("consultas $label: pedir la página 2 con bind_all() no debe dar error", 'sin error', $error->getMessage());
+        same("consultas $label: pedir la página 2 con el repositorio no debe dar error", 'sin error', $error->getMessage());
         continue;
     }
-    same("consultas $label: la página 2 trae 10 filas con bind_all()", 10, count($page['ids']));
+    same("consultas $label: la página 2 trae 10 filas (el repositorio enlaza LIMIT y OFFSET como enteros)", 10, count($page['ids']));
     same("consultas $label: el recuento es el esperado", $total, $page['total']);
 
-    [$sql, $params] = user_list_query('', 10, 0);
+    [$sql, $params] = UserSearch::listQuery('', 10, 0);
     $naive = $pdo->prepare($sql);
     $threw = false;
     try {
@@ -111,12 +111,12 @@ section('Paginar recorre todas las filas, sin huecos ni repeticiones, y en orden
 $terms = ['' => $total, 'itest-' => $total, 'prueba' => 25, 'ITEST-0' => 9, 'zzzzz-no-existe' => 0, 'a' => null, '%' => 1, '_' => 1, '\\' => 1];
 foreach ($terms as $term => $expected) {
     $term = (string) $term;
-    $first = fetchPage($pdo, $term, 1);
+    $first = fetchPage($repo, $term, 1);
     $pages = $first['pagination']['pages'];
     $allIds = [];
     $sizes = [];
     for ($p = 1; $p <= $pages; $p++) {
-        $result = fetchPage($pdo, $term, $p);
+        $result = fetchPage($repo, $term, $p);
         $allIds = array_merge($allIds, $result['ids']);
         $sizes[] = count($result['ids']);
     }
@@ -133,21 +133,14 @@ foreach ($terms as $term => $expected) {
 }
 
 section('Una página fuera de rango se corrige a la última y trae sus filas');
-$beyond = fetchPage($pdo, 'itest-', 999);
+$beyond = fetchPage($repo, 'itest-', 999);
 same('?page=999 con 31 usuarios muestra la página 4', 4, $beyond['pagination']['page']);
 same('...con las 1 filas que le quedan', 1, count($beyond['ids']));
-$huge = fetchPage($pdo, 'itest-', PHP_INT_MAX);
+$huge = fetchPage($repo, 'itest-', PHP_INT_MAX);
 same('PHP_INT_MAX también acaba en la última página, sin desbordar el OFFSET', 4, $huge['pagination']['page']);
 
 section('Los comodines de LIKE se buscan como texto');
-$literal = static function (string $term) use ($pdo): array {
-    [$sql, $params] = user_list_query($term, 100, 0);
-    $stmt = $pdo->prepare(str_replace('SELECT id,', 'SELECT name,', $sql));
-    bind_all($stmt, $params);
-    $stmt->execute();
-
-    return $stmt->fetchAll(PDO::FETCH_COLUMN);
-};
+$literal = fn(string $term): array => array_map(static fn(User $user): string => $user->name, $repo->page($term, true, 100, 0));
 same('«%» solo encuentra el que lleva un % de verdad', ['Pct%Real'], $literal('%'));
 same('«_» solo encuentra el que lleva un guion bajo de verdad', ['Sub_Real'], $literal('_'));
 same('«\\» solo encuentra el que lleva una barra invertida de verdad', ['Back\\Slash'], $literal('\\'));
@@ -164,11 +157,11 @@ same('una parte del correo', ['Zoé'], $literal('itest-zoe'));
 section('Mejora 3: la lista de roles de PHP y el ENUM de la BD son la misma');
 $enum = (string) $pdo->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'")->fetchColumn();
 preg_match_all("/'([^']+)'/", $enum, $enumValues);
-same('user_roles() tiene exactamente los valores del ENUM, en el mismo orden', $enumValues[1], array_keys(user_roles()));
+same('User::roles() tiene exactamente los valores del ENUM, en el mismo orden', $enumValues[1], array_keys(User::roles()));
 $default = (string) $pdo->query("SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'")->fetchColumn();
-same('USER_ROLE_DEFAULT es el DEFAULT de la columna', $default, USER_ROLE_DEFAULT);
+same('User::ROLE_DEFAULT es el DEFAULT de la columna', $default, User::ROLE_DEFAULT);
 $lengths = $pdo->query("SELECT COLUMN_NAME, CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME IN ('document', 'phone')")->fetchAll(PDO::FETCH_KEY_PAIR);
-same('los máximos de user_fields() coinciden con las columnas (document, phone)', [(int) $lengths['document'], (int) $lengths['phone']], [user_fields()['document']['max'], user_fields()['phone']['max']]);
+same('los máximos de $validator->fields() coinciden con las columnas (document, phone)', [(int) $lengths['document'], (int) $lengths['phone']], [$validator->fields()['document']['max'], $validator->fields()['phone']['max']]);
 
 section('Mejora 3: la búsqueda también encuentra por documento');
 same('«zx-9988» (minúsculas, a medias) encuentra a Zoé', ['Zoé'], $literal('zx-9988'));
@@ -178,12 +171,12 @@ section('Mejora 4: el borrado lógico oculta de verdad (listado, recuento, búsq
 $idOf = static fn(string $email): int => (int) $pdo->query("SELECT id FROM users WHERE email = '$email'")->fetchColumn();
 $gone = [$idOf('itest-01@example.com'), $idOf('itest-02@example.com'), $idOf('itest-zoe@example.com'), $idOf('itest-pct@example.com')];
 $pdo->exec('UPDATE users SET active = 0 WHERE id IN (' . implode(',', $gone) . ')');
-$visible = fetchPage($pdo, '', 1);
+$visible = fetchPage($repo, '', 1);
 same('el recuento de visibles baja en 4', $total - 4, $visible['total']);
-same('ningún eliminado aparece en las páginas de visibles', [], (function () use ($pdo, $gone): array {
+same('ningún eliminado aparece en las páginas de visibles', [], (function () use ($repo, $gone): array {
     $seen = [];
     for ($p = 1; $p <= 4; $p++) {
-        $seen = array_merge($seen, fetchPage($pdo, '', $p)['ids']);
+        $seen = array_merge($seen, fetchPage($repo, '', $p)['ids']);
     }
 
     return array_values(array_intersect($seen, $gone));
@@ -191,30 +184,40 @@ same('ningún eliminado aparece en las páginas de visibles', [], (function () u
 same('la búsqueda tampoco encuentra a un eliminado («zx-9988» era el documento de Zoé)', [], $literal('zx-9988'));
 same('...ni por nombre', [], $literal('ZOE nunez'));
 same('«%» deja de encontrar a Pct%Real eliminado', [], $literal('%'));
-$hidden = fetchPage($pdo, '', 1, false);
+$hidden = fetchPage($repo, '', 1, false);
 same('la vista de eliminados cuenta exactamente los 4', 4, $hidden['total']);
 same('...y trae exactamente esos ids (de mayor a menor)', [...(function () use ($gone): array { rsort($gone); return $gone; })()], $hidden['ids']);
-same('buscar dentro de los eliminados: «itest-0» encuentra solo itest-01 e itest-02', 2, fetchPage($pdo, 'itest-0', 1, false)['total']);
-same('una búsqueda que solo casa con visibles no encuentra nada en eliminados', 0, fetchPage($pdo, 'itest-03', 1, false)['total']);
-same('visibles + eliminados = todos', $total, fetchPage($pdo, '', 1)['total'] + fetchPage($pdo, '', 1, false)['total']);
+same('buscar dentro de los eliminados: «itest-0» encuentra solo itest-01 e itest-02', 2, fetchPage($repo, 'itest-0', 1, false)['total']);
+same('una búsqueda que solo casa con visibles no encuentra nada en eliminados', 0, fetchPage($repo, 'itest-03', 1, false)['total']);
+same('visibles + eliminados = todos', $total, fetchPage($repo, '', 1)['total'] + fetchPage($repo, '', 1, false)['total']);
 
 section('Mejora 4: restaurar y los UNIQUE (cubren también a los eliminados)');
 $gonePerson = $pdo->query("SELECT email, document FROM users WHERE email = 'itest-zoe@example.com'")->fetch();
-same('el dueño eliminado de un correo se detecta como eliminado', true, conflicting_user_is_inactive($pdo, 'email', 'itest-zoe@example.com'));
-same('...también con otra capitalización (collation)', true, conflicting_user_is_inactive($pdo, 'email', 'ITEST-ZOE@example.com'));
-same('...y por documento', true, conflicting_user_is_inactive($pdo, 'document', 'ZX-998877'));
-same('el dueño de un correo ACTIVO no se marca como eliminado', false, conflicting_user_is_inactive($pdo, 'email', 'itest-03@example.com'));
-same('un correo que no existe no es de un eliminado', false, conflicting_user_is_inactive($pdo, 'email', 'nadie@example.com'));
-$duplicate = null;
-try {
-    $insert->execute([':n' => 'Otro', ':l' => 'Zoe', ':e' => 'itest-zoe@example.com', ':p' => null]);
-} catch (PDOException $error) {
-    $duplicate = duplicate_user_field((string) ($error->errorInfo[2] ?? ''));
-}
-same('crear otro usuario con el correo de un eliminado SIGUE chocando con el UNIQUE (decisión de M4)', 'email', $duplicate);
+$newData = static fn(string $email, string $document = ''): array => ['name' => 'Otro', 'last_name' => 'Zoe', 'email' => $email, 'phone' => '', 'document' => $document, 'birth_date' => '', 'role' => 'user'];
+$duplicateOf = static function (array $data) use ($repo): ?DuplicateUserException {
+    try {
+        $repo->create($data);
+    } catch (DuplicateUserException $error) {
+        return $error;
+    }
+
+    return null;
+};
+$dup = $duplicateOf($newData('itest-zoe@example.com'));
+same('crear otro usuario con el correo de un eliminado SIGUE chocando con el UNIQUE (decisión de M4)...', ['email', true], [$dup?->field, $dup?->ownerInactive]);
+same('...y el aviso explica que está eliminado', 'Ese correo pertenece a un usuario eliminado. Restáuralo desde «Eliminados» o usa otro correo.', $dup?->userMessage(false));
+$dup = $duplicateOf($newData('ITEST-ZOE@example.com'));
+same('...también con otra capitalización (collation)', ['email', true], [$dup?->field, $dup?->ownerInactive]);
+$dup = $duplicateOf($newData('otro-itest@example.com', 'ZX-998877'));
+same('...y por documento', ['document', true], [$dup?->field, $dup?->ownerInactive]);
+$dup = $duplicateOf($newData('itest-03@example.com'));
+same('el dueño de un correo ACTIVO no se marca como eliminado', ['email', false], [$dup?->field, $dup?->ownerInactive]);
+same('...y su aviso es el normal', 'Ya existe un usuario registrado con ese correo.', $dup?->userMessage(false));
+same('...(el de edición dice «otro usuario»)', 'Ya existe otro usuario registrado con ese correo.', $dup?->userMessage(true));
+same('en ningún caso se creó el usuario repetido', 0, (int) $pdo->query("SELECT COUNT(*) FROM users WHERE email IN ('otro-itest@example.com') OR (name = 'Otro' AND last_name = 'Zoe')")->fetchColumn());
 $pdo->exec('UPDATE users SET active = 1 WHERE id IN (' . implode(',', $gone) . ')');
-same('restaurar (active = 1) no choca con ningún UNIQUE', $total, fetchPage($pdo, '', 1)['total']);
-same('...y la vista de eliminados queda vacía', 0, fetchPage($pdo, '', 1, false)['total']);
+same('restaurar (active = 1) no choca con ningún UNIQUE', $total, fetchPage($repo, '', 1)['total']);
+same('...y la vista de eliminados queda vacía', 0, fetchPage($repo, '', 1, false)['total']);
 same('...y Zoé vuelve a encontrarse', ['Zoé'], $literal('zx-9988'));
 
 section('Mejora 4: el índice (active, id) existe');
@@ -222,45 +225,45 @@ section('Mejora 4: el índice (active, id) existe');
 // que el índice se USA con muchas filas se midió aparte con 200.000 (ver plan.md, M4). Esto solo vigila que exista.
 same('idx_active_id es un índice de (active, id)', ['active', 'id'], $pdo->query("SELECT COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_active_id' ORDER BY SEQ_IN_INDEX")->fetchAll(PDO::FETCH_COLUMN));
 
-section('Mejora 5: authenticate_admin() contra la tabla admins');
+section('Mejora 5: AdminAuth::authenticate() contra la tabla admins');
 $pdo->exec('CREATE TEMPORARY TABLE admins_itest LIKE admins');
 $pdo->exec('ALTER TABLE admins_itest RENAME TO admins');
 $secret = 'una-clave-de-prueba-123';
 $pdo->prepare('INSERT INTO admins (email, password_hash) VALUES (:e, :h)')->execute([':e' => 'root@example.com', ':h' => password_hash($secret, PASSWORD_DEFAULT)]);
 $adminId = (int) $pdo->query("SELECT id FROM admins WHERE email = 'root@example.com'")->fetchColumn();
-same('correo y contraseña correctos', ['id' => $adminId, 'email' => 'root@example.com'], authenticate_admin($pdo, 'root@example.com', $secret));
-same('el correo no distingue mayúsculas ni espacios alrededor', ['id' => $adminId, 'email' => 'root@example.com'], authenticate_admin($pdo, '  ROOT@Example.COM ', $secret));
-same('contraseña incorrecta', null, authenticate_admin($pdo, 'root@example.com', 'otra-clave-distinta'));
-same('la contraseña distingue mayúsculas', null, authenticate_admin($pdo, 'root@example.com', strtoupper($secret)));
-same('un espacio de más en la contraseña no se perdona (no se recorta)', null, authenticate_admin($pdo, 'root@example.com', $secret . ' '));
-same('contraseña vacía', null, authenticate_admin($pdo, 'root@example.com', ''));
-same('correo que no existe', null, authenticate_admin($pdo, 'nadie@example.com', $secret));
-same('correo vacío', null, authenticate_admin($pdo, '', $secret));
-same('la clave correcta con un NUL al final no entra', null, authenticate_admin($pdo, 'root@example.com', $secret . "\0"));
-same('una contraseña de 2000 bytes se rechaza sin hashearla ni dar error', null, authenticate_admin($pdo, 'root@example.com', str_repeat('a', 2000)));
-same('la clave correcta seguida de basura DESPUÉS de un NUL no entra (bcrypt lee hasta el NUL)', null, authenticate_admin($pdo, 'root@example.com', $secret . "\0cualquier-cosa"));
-same('la clave correcta con 72 bytes de sobra tampoco (bcrypt solo lee 72)', null, authenticate_admin($pdo, 'root@example.com', str_pad($secret, 80, 'x')));
-same('...y una contraseña de 72 bytes que SÍ es la guardada sí entra', ['id' => (int) $pdo->query("SELECT id FROM admins WHERE email = 'root@example.com'")->fetchColumn(), 'email' => 'root@example.com'], (function () use ($pdo): ?array {
+same('correo y contraseña correctos', ['id' => $adminId, 'email' => 'root@example.com'], AdminAuth::authenticate($admins, 'root@example.com', $secret));
+same('el correo no distingue mayúsculas ni espacios alrededor', ['id' => $adminId, 'email' => 'root@example.com'], AdminAuth::authenticate($admins, '  ROOT@Example.COM ', $secret));
+same('contraseña incorrecta', null, AdminAuth::authenticate($admins, 'root@example.com', 'otra-clave-distinta'));
+same('la contraseña distingue mayúsculas', null, AdminAuth::authenticate($admins, 'root@example.com', strtoupper($secret)));
+same('un espacio de más en la contraseña no se perdona (no se recorta)', null, AdminAuth::authenticate($admins, 'root@example.com', $secret . ' '));
+same('contraseña vacía', null, AdminAuth::authenticate($admins, 'root@example.com', ''));
+same('correo que no existe', null, AdminAuth::authenticate($admins, 'nadie@example.com', $secret));
+same('correo vacío', null, AdminAuth::authenticate($admins, '', $secret));
+same('la clave correcta con un NUL al final no entra', null, AdminAuth::authenticate($admins, 'root@example.com', $secret . "\0"));
+same('una contraseña de 2000 bytes se rechaza sin hashearla ni dar error', null, AdminAuth::authenticate($admins, 'root@example.com', str_repeat('a', 2000)));
+same('la clave correcta seguida de basura DESPUÉS de un NUL no entra (bcrypt lee hasta el NUL)', null, AdminAuth::authenticate($admins, 'root@example.com', $secret . "\0cualquier-cosa"));
+same('la clave correcta con 72 bytes de sobra tampoco (bcrypt solo lee 72)', null, AdminAuth::authenticate($admins, 'root@example.com', str_pad($secret, 80, 'x')));
+same('...y una contraseña de 72 bytes que SÍ es la guardada sí entra', ['id' => (int) $pdo->query("SELECT id FROM admins WHERE email = 'root@example.com'")->fetchColumn(), 'email' => 'root@example.com'], (function () use ($pdo, $admins): ?array {
     $long = str_repeat('k', 72);
     $pdo->prepare('UPDATE admins SET password_hash = :h WHERE email = :e')->execute([':h' => password_hash($long, PASSWORD_DEFAULT), ':e' => 'root@example.com']);
-    $result = authenticate_admin($pdo, 'root@example.com', $long);
+    $result = AdminAuth::authenticate($admins, 'root@example.com', $long);
     $pdo->prepare('UPDATE admins SET password_hash = :h WHERE email = :e')->execute([':h' => password_hash('una-clave-de-prueba-123', PASSWORD_DEFAULT), ':e' => 'root@example.com']);
 
     return $result;
 })());
 foreach (["' OR '1'='1", "root@example.com' -- ", "x' OR 1=1 -- ", '%', 'root@example.com%'] as $injection) {
-    same('«' . $injection . '» como correo no entra', null, authenticate_admin($pdo, $injection, $secret));
+    same('«' . $injection . '» como correo no entra', null, AdminAuth::authenticate($admins, $injection, $secret));
 }
 same('el hash guardado no es la contraseña ni la contiene', [true, false], [str_starts_with((string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn(), '$2y$'), str_contains((string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn(), $secret)]);
 
 $cheap = password_hash($secret, PASSWORD_BCRYPT, ['cost' => 4]);
 $pdo->prepare('UPDATE admins SET password_hash = :h WHERE id = :id')->execute([':h' => $cheap, ':id' => $adminId]);
-same('una contraseña correcta con un hash de coste 4 entra...', ['id' => $adminId, 'email' => 'root@example.com'], authenticate_admin($pdo, 'root@example.com', $secret));
+same('una contraseña correcta con un hash de coste 4 entra...', ['id' => $adminId, 'email' => 'root@example.com'], AdminAuth::authenticate($admins, 'root@example.com', $secret));
 $after = (string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn();
 same('...y el hash se recalcula con el coste actual (password_needs_rehash)', [false, true], [password_needs_rehash($after, PASSWORD_DEFAULT), $after !== $cheap]);
 same('...y la contraseña sigue valiendo con el hash nuevo', true, password_verify($secret, $after));
 $pdo->prepare('UPDATE admins SET password_hash = :h WHERE id = :id')->execute([':h' => $cheap, ':id' => $adminId]);
-authenticate_admin($pdo, 'root@example.com', 'contraseña-incorrecta');
+AdminAuth::authenticate($admins, 'root@example.com', 'contraseña-incorrecta');
 same('una contraseña INCORRECTA no recalcula nada', $cheap, (string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn());
 $duplicate = null;
 try {
@@ -271,18 +274,79 @@ try {
 same('el correo del administrador es único (también con otra capitalización)', 1062, $duplicate);
 $pdo->exec('DROP TEMPORARY TABLE admins');
 
+section('Mejora 8: UserRepository (la única capa con SQL de usuarios)');
+$idByEmail = static fn(string $email): int => (int) $pdo->query("SELECT id FROM users WHERE email = '$email'")->fetchColumn();
+$id3 = $idByEmail('itest-03@example.com');
+$u3 = $repo->findActive($id3);
+same('findActive() devuelve una entidad User con tipos', [true, 'Usuario', 'Prueba03', 'itest-03@example.com', null, true, 'user'], [$u3 instanceof User, $u3?->name, $u3?->lastName, $u3?->email, $u3?->phone, $u3?->active, $u3?->role]);
+same('...y sus métodos', ['Usuario Prueba03', 'Usuario', '', ''], [$u3?->fullName(), $u3?->formData()['name'], $u3?->formData()['phone'], $u3?->formData()['document']]);
+same('un id que no existe no es un usuario', null, $repo->findActive(4294967295));
+same('deactivate() lo elimina (true)', true, $repo->deactivate($id3));
+same('...y una segunda vez no hace nada (false): ya estaba eliminado', false, $repo->deactivate($id3));
+same('un eliminado no se encuentra con findActive() (no se edita)', null, $repo->findActive($id3));
+same('la fila SIGUE en la tabla con active = 0 (borrado lógico)', '0', (string) $pdo->query("SELECT active FROM users WHERE id = $id3")->fetchColumn());
+same('update() sobre un eliminado no cambia nada (false)', false, $repo->update($id3, $validator->read(['name' => 'Cambiado', 'last_name' => 'X', 'email' => 'itest-03@example.com', 'role' => 'user'])));
+same('restore() lo devuelve (true)', true, $repo->restore($id3));
+same('...y una segunda vez no hace nada (false): ya estaba activo', false, $repo->restore($id3));
+same('restore() de un id que no existe', false, $repo->restore(4294967295));
+same('deactivate() de un id que no existe', false, $repo->deactivate(4294967295));
+
+$tokenBefore = $repo->findActive($id3)?->rowToken();
+same('update() con los MISMOS valores devuelve true (la fila existe aunque no cambie) y la huella no cambia', [true, $tokenBefore], [
+    $repo->update($id3, $validator->read(['name' => 'Usuario', 'last_name' => 'Prueba03', 'email' => 'itest-03@example.com', 'role' => 'user'])),
+    $repo->findActive($id3)?->rowToken(),
+]);
+same('update() con otros valores los guarda y cambia la huella', [true, 'Cambiado', 'AB-99999', '1991-02-03', 'editor', true], (function () use ($repo, $validator, $id3, $tokenBefore): array {
+    $ok = $repo->update($id3, $validator->read(['name' => 'Cambiado', 'last_name' => 'Prueba03', 'email' => 'itest-03@example.com', 'document' => 'ab-99999', 'birth_date' => '1991-02-03', 'role' => 'editor']));
+    $after = $repo->findActive($id3);
+
+    return [$ok, $after?->name, $after?->document, $after?->birthDate, $after?->role, $after?->rowToken() !== $tokenBefore];
+})());
+same('update() de un id que no existe', false, $repo->update(4294967295, $validator->read(['name' => 'A', 'last_name' => 'B', 'email' => 'zz@example.com', 'role' => 'user'])));
+$err = null;
+try {
+    $repo->update($id3, $validator->read(['name' => 'Cambiado', 'last_name' => 'Prueba03', 'email' => 'itest-04@example.com', 'role' => 'editor']));
+} catch (DuplicateUserException $e) {
+    $err = $e;
+}
+same('update() con el correo de OTRO usuario lanza DuplicateUserException(email, dueño activo)', ['email', false, 'Ya existe otro usuario registrado con ese correo.'], [$err?->field, $err?->ownerInactive, $err?->userMessage(true)]);
+same('...y el usuario no cambió', 'itest-03@example.com', $repo->findActive($id3)?->email);
+
+$repo->create($validator->read(['name' => 'Nuevo', 'last_name' => 'Repo', 'email' => 'ITEST-NEW@Example.com', 'role' => 'admin']));
+$new = $repo->findActive($idByEmail('itest-new@example.com'));
+same('create() guarda lo opcional vacío como NULL (no como "")', [null, null, null, 'admin', 'itest-new@example.com'], [$new?->phone, $new?->document, $new?->birthDate, $new?->role, $new?->email]);
+same('...y en la BD son NULL de verdad', [1, 1, 1], array_map('intval', $pdo->query("SELECT phone IS NULL, document IS NULL, birth_date IS NULL FROM users WHERE email = 'itest-new@example.com'")->fetch(PDO::FETCH_NUM)));
+$repo->create($validator->read(['name' => 'Nuevo', 'last_name' => 'Repo2', 'email' => 'itest-new2@example.com', 'role' => 'user']));
+same('varios usuarios sin documento conviven (todos NULL en un UNIQUE)', 2, (int) $pdo->query("SELECT COUNT(*) FROM users WHERE email IN ('itest-new@example.com', 'itest-new2@example.com') AND document IS NULL")->fetchColumn());
+same('create() con un correo ya usado lanza DuplicateUserException', true, $duplicateOf($newData('itest-new@example.com')) instanceof DuplicateUserException);
+same('page() trae entidades User, de mayor a menor id', true, (function () use ($repo): bool {
+    $page = $repo->page('', true, 10, 0);
+    $ids = array_map(static fn(User $u): int => $u->id, $page);
+    $sorted = $ids;
+    rsort($sorted);
+
+    return $page !== [] && $ids === $sorted && !in_array(false, array_map(static fn($u): bool => $u instanceof User && $u->active, $page), true);
+})());
+same('page() de la vista de eliminados marca active = false', [false], array_values(array_unique(array_map(static fn(User $u): bool => $u->active, (function () use ($repo, $pdo, $id3): array {
+    $repo->deactivate($id3);
+    $page = $repo->page('', false, 10, 0);
+    $repo->restore($id3);
+
+    return $page;
+})()))));
+
 section('Un texto hostil se trata como texto');
 foreach (["' OR '1'='1", "'; DROP TABLE users; --", '" OR 1=1 --', '%\' OR \'x\' LIKE \'%'] as $hostile) {
     $thrown = false;
     $rowsFound = -1;
     try {
-        $rowsFound = fetchPage($pdo, $hostile, 1)['total'];
+        $rowsFound = fetchPage($repo, $hostile, 1)['total'];
     } catch (PDOException) {
         $thrown = true;
     }
     same('«' . $hostile . '»: sin error y sin resultados', [false, 0], [$thrown, $rowsFound]);
 }
-same('la tabla sigue intacta tras los textos hostiles', $total, (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn());
+same('la tabla sigue intacta tras los textos hostiles (los 31 iniciales y los 2 de las pruebas del repositorio)', $total + 2, (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn());
 
 $pdo->exec('DROP TEMPORARY TABLE users');
 section('Al terminar, los datos reales están como estaban');

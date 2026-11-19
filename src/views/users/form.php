@@ -14,7 +14,7 @@ declare(strict_types=1);
  * @var string $submitLabel Texto del botón de envío (Registrar, Actualizar).
  * @var int|null $userId Id del usuario que se edita; null al crear (no se pinta el campo oculto).
  * @var string|null $rowToken Huella de la fila con la que se abrió el formulario (user_row_token()); null al crear.
- * @var array<string, string|int> $returnState Estado del listado al que se vuelve (list_state()); [] al crear.
+ * @var array<string, string|int> $returnState Estado del listado al que se vuelve (Pagination::listState()); [] al crear.
  * @var string $cancelUrl A dónde lleva "Cancelar" (el listado, en el mismo estado en que se salió).
  */
 ?>

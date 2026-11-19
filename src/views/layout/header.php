@@ -2,8 +2,12 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../helpers.php';
-require_once __DIR__ . '/../csrf.php';
+/**
+ * Cabecera común de las páginas (hasta <main>). Variables (las pasa View::page()):
+ *
+ * @var string $pageTitle Título de la página.
+ * @var array{id: int, email: string}|null $currentAdmin El administrador conectado (null en el login).
+ */
 
 $page = $pageTitle ?? "Inicio";
 $title = "Gestión de usuarios | " . $page;

@@ -26,8 +26,11 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 
-require_once __DIR__ . '/../includes/helpers.php';
-require_once __DIR__ . '/../includes/admin-auth.php';
+require_once __DIR__ . '/../bootstrap.php';
+
+use App\Auth\AdminAuth;
+use App\Database\Connection;
+use App\Repository\AdminRepository;
 
 $args = array_slice($argv, 1);
 
@@ -36,7 +39,7 @@ if ($args === [] || count($args) > 2 || in_array($args[0], ['-h', '--help'], tru
     exit($args === [] || count($args) > 2 ? 2 : 0);
 }
 
-$email = normalize_admin_email($args[0]);
+$email = AdminAuth::normalizeEmail($args[0]);
 
 if (isset($args[1])) {
     $password = $args[1];
@@ -64,7 +67,7 @@ if (isset($args[1])) {
     $password = rtrim($line, "\r\n");
 }
 
-$errors = validate_new_admin($email, $password);
+$errors = AdminAuth::validateNew($email, $password);
 
 if ($errors !== []) {
     foreach ($errors as $message) {
@@ -74,9 +77,7 @@ if ($errors !== []) {
 }
 
 try {
-    require __DIR__ . '/../includes/connection.php';
-    $stmt = $pdo->prepare('INSERT INTO admins (email, password_hash) VALUES (:email, :hash)');
-    $stmt->execute([':email' => $email, ':hash' => password_hash($password, PASSWORD_DEFAULT)]);
+    (new AdminRepository(Connection::create()))->create($email, password_hash($password, PASSWORD_DEFAULT));
 } catch (RuntimeException $error) {
     if ($error instanceof PDOException && ($error->errorInfo[1] ?? null) === 1062) {
         fwrite(STDERR, "Error: ya existe un administrador con ese correo.\n");

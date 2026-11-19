@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/helpers.php';
-require_once __DIR__ . '/origin.php';
 
 /**
  * Corta la petición con un 403 si no viene del propio sitio. Se llama al principio de todo
@@ -23,10 +21,10 @@ function reject_foreign_origin(): void
         $allowed = is_allowed_origin(
             $_SERVER['HTTP_ORIGIN'] ?? null,
             $_SERVER['HTTP_REFERER'] ?? null,
-            environment('APP_ORIGIN')
+            \App\Config\Environment::get('APP_ORIGIN')
         );
     } catch (RuntimeException $error) {
-        log_exception('config', $error);
+        \App\Logging\Logger::exception('config', $error);
         http_response_code(500);
         header('Content-Type: text/plain; charset=UTF-8');
         echo "Ocurrió un error inesperado. Inténtalo más tarde.\n";

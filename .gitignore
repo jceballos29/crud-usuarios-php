@@ -3,6 +3,7 @@
 
 # Dependencias
 /vendor/
+/src/vendor/
 /node_modules/
 
 # Editor / sistema

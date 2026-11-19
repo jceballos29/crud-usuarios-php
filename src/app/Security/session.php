@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/helpers.php';
 
 /**
  * Sesión de administrador (M5). El servidor guarda QUIÉN eres en $_SESSION (un archivo en el contenedor
@@ -40,7 +39,7 @@ function session_cookie_options(bool $secure): array
 function app_uses_https(): bool
 {
     try {
-        return str_starts_with(strtolower(environment('APP_ORIGIN')), 'https://');
+        return str_starts_with(strtolower(\App\Config\Environment::get('APP_ORIGIN')), 'https://');
     } catch (RuntimeException) {
         return false;
     }

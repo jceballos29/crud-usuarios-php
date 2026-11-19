@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/helpers.php';
-require_once __DIR__ . '/session.php';
 
 /**
  * Token CSRF (M6). CSRF (Cross-Site Request Forgery): el navegador adjunta la cookie de sesión a CUALQUIER

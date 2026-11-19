@@ -27,7 +27,7 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | Mejora 5. Inicio de sesión | Hecha (rama `mejora-5-login`) |
 | Mejora 6. Tokens CSRF | Hecha (rama `mejora-6-csrf`) |
 | Mejora 7. Usuario de BD con mínimo privilegio | Hecha (rama `mejora-7-minimo-privilegio`) |
-| Mejora 8 | Pendiente |
+| Mejora 8. Separación en capas (hacia MVC) | Hecha (rama `mejora-8-capas`) |
 
 ## Qué se construye
 
@@ -52,7 +52,7 @@ Tabla `users` (`database/01-schema.sql`):
 
 - Código, tablas y nombres de archivo en **inglés**; textos para el usuario en **español**.
 - `declare(strict_types=1);` en todos los archivos PHP.
-- Toda salida a HTML pasa por `escape()` (`src/includes/helpers.php`).
+- Toda salida a HTML pasa por `escape()` (`escape()`, en `src/app/support.php`).
 - Credenciales **solo** por variables de entorno (`.env`), nunca en el código.
 - Lo que no debe ser accesible por URL vive fuera de `src/public/`.
 
@@ -128,8 +128,9 @@ docker compose ps        # los 4 servicios en running; db en healthy
 
 Hay cuatro niveles y no necesitan instalar nada más que lo que ya usa el proyecto:
 
-- **Unitarias** (`src/tests/unit.php`): las funciones puras (validación, id, origen, fechas, escape, búsqueda, paginación). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
-- **De integración** (`src/tests/integration.php`): las consultas de búsqueda y paginación contra MySQL, sobre una tabla temporal que no toca tus datos. `bin/as-migrator php tests/integration.php` (necesita el usuario de migraciones: crea tablas temporales).
+- **Unitarias** (`src/tests/unit.php`): la lógica pura (validador, entidad `User`, búsqueda, paginación, autenticación, origen, sesión, fechas, escape). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
+- **De integración** (`src/tests/integration.php`): los repositorios (`UserRepository`, `AdminRepository`: búsqueda, paginación, borrado lógico, duplicados, inicio de sesión) contra MySQL, sobre una tabla temporal que no toca tus datos. `bin/as-migrator php tests/integration.php` (necesita el usuario de migraciones: crea tablas temporales).
+- **De arquitectura** (`src/tests/architecture.php`): lee los archivos y comprueba que cada pieza cumple su sola responsabilidad: solo los repositorios ejecutan SQL, las páginas de `public/` y las vistas no tocan la BD, las vistas escapan toda salida y las clases se cargan por su nombre. `docker compose exec php php tests/architecture.php`.
 - **De permisos** (`tests/privileges.sh`): habla con MySQL como el usuario de la aplicación y el de migraciones y comprueba qué puede y qué NO puede hacer cada uno (`DROP`, `ALTER`, `DELETE`, `GRANT`, leer `mysql.user`...), y que `database/03-users.sh` es repetible y corrige a un usuario con demasiados permisos.
 - **De las migraciones** (`tests/migration-001.sh`, `-002.sh` y `-003.sh`): aplican `database/migrations/` a una BD temporal con el esquema anterior y comprueban que acaba igual que una instalación nueva. Usan root y borran sus bases temporales.
 - **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, origen en los tres POST, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
@@ -158,10 +159,9 @@ crud-usuarios-docker/
 │   ├── 01-schema.sql        # Tabla users (instalación nueva)
 │   ├── 02-seed.sql          # 3 usuarios de prueba y el administrador de desarrollo
 │   ├── 03-users.sh          # Crea los usuarios de la BD con mínimo privilegio (aplicación y migraciones), con las claves de .env
-│   ├── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql, 002-active.sql, 003-admins.sql)
-│   └── 02-seed.sql          # SET NAMES utf8mb4 + 3 usuarios de prueba
+│   └── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql, 002-active.sql, 003-admins.sql)
 └── src/                     # Montado en /var/www/html
-    ├── public/              # Raíz web: lo único que ve el navegador
+    ├── public/              # Raíz web: lo único que ve el navegador. Cada página: 7 líneas (arranque + un método de un controlador)
     │   ├── index.php        # Listado de usuarios (MVP 3)
     │   ├── create.php       # Alta de usuarios (MVP 4)
     │   ├── edit.php         # Edición de usuarios (MVP 5)
@@ -171,22 +171,24 @@ crud-usuarios-docker/
     │   ├── restore.php      # Restaurar a un eliminado, solo POST y solo desde el propio sitio (M4)
     │   ├── status.php       # Diagnóstico del stack (solo APP_ENV=local)
     │   └── js/confirm-submit.js   # Pide confirmación en los formularios con data-confirm
-    ├── includes/            # Código compartido, no accesible por URL
-    │   ├── connection.php               # Crea $pdo (PDO)
-    │   ├── helpers.php                  # environment(), escape(), log_exception()
-    │   ├── user-validation.php          # Campos, limpieza y validación (compartido)
-    │   ├── origin.php                   # Funciones puras: comprueban Origin/Referer contra APP_ORIGIN
-    │   ├── user-search.php              # Funciones puras de la búsqueda (término, patrón LIKE, consultas de listado y recuento)
-    │   ├── pagination.php               # Funciones puras de la paginación (página, rango, enlaces, URL del listado)
-    │   ├── admin-auth.php               # Credenciales de administrador: validar, normalizar y authenticate_admin() (M5)
-    │   ├── csrf.php                     # Token CSRF por sesión: csrf_field(), require_csrf() (M6)
-    │   ├── session.php                  # Sesión: cookie, caducidad, require_login() (M5)
-    │   ├── user-conflict.php            # ¿El dueño de un correo/documento duplicado está eliminado? (avisos de M4)
-    │   ├── request-guard.php            # reject_foreign_origin(): el 403 de create, edit, delete y restore
-    │   ├── DatabaseConnectionException.php
-    │   ├── layout/                      # header.php, footer.php
-    │   └── partials/                    # users-list.php, pagination.php, user-form.php, user-not-found.php, action-error.php
-    ├── tests/               # unit.php, integration.php y harness.php (común); fuera de public/
+    ├── bootstrap.php        # Arranque común: carga el autoload de Composer (vendor/)
+    ├── composer.json        # Autoload PSR-4 (App\ -> app/) y las funciones de app/. Sin dependencias de terceros
+    ├── app/                 # El código de la aplicación (no accesible por URL), una responsabilidad por clase
+    │   ├── Controller/      # UserController (listar, crear, editar, eliminar, restaurar), AuthController, StatusController
+    │   ├── Repository/      # UserRepository y AdminRepository: ÚNICO lugar con SQL
+    │   ├── Domain/User.php  # La entidad: datos tipados e inmutables, huella de edición, roles
+    │   ├── Validation/      # UserValidator: campos, limpieza y reglas (crear y editar usan las mismas)
+    │   ├── Search/          # UserSearch: término, patrón LIKE y consultas de búsqueda (puro, no ejecuta nada)
+    │   ├── Http/            # Pagination, Response, Failure (de un fallo a un código HTTP y un aviso)
+    │   ├── Auth/AdminAuth.php           # Reglas de las credenciales y comprobación (con AdminRepository)
+    │   ├── Database/Connection.php      # Construye el PDO con las variables de entorno
+    │   ├── Config/Environment.php, Logging/Logger.php, Exceptions/   # Entorno, log y excepciones propias
+    │   ├── View/View.php    # Pinta las vistas de views/
+    │   ├── Container.php    # Construye las piezas con sus dependencias (la conexión se abre al pedirla)
+    │   ├── support.php      # Funciones de vistas: escape(), format_utc_datetime()
+    │   └── Security/        # Funciones de la petición: origin, request-guard, session, csrf (tocan cabeceras y $_SESSION)
+    ├── views/               # HTML con la mínima lógica: layout/, users/, auth/, partials/
+    ├── tests/               # unit.php, integration.php, architecture.php y harness.php (común); fuera de public/
     └── scripts/             # Solo consola
         ├── db-check.php
         ├── create-admin.php  # Crea un administrador (M5)
@@ -198,7 +200,7 @@ Estructura objetivo al terminar el CRUD base: ver el Anexo E de [`plan.md`](plan
 
 ## Origen de la aplicación (`APP_ORIGIN`)
 
-Los POST de `login.php`, `logout.php`, `create.php`, `edit.php`, `delete.php` y `restore.php` solo se aceptan si vienen del propio sitio: `reject_foreign_origin()` (en `includes/request-guard.php`) compara la cabecera `Origin` (o, si falta, `Referer`) con `APP_ORIGIN` y responde **403** si no coincide, si falta o si es `null`, **antes** de mirar lo que se envía (ni siquiera se valida el id ni los campos). Es una capa contra peticiones enviadas desde otras páginas; no sustituye al token CSRF del módulo M6. Los GET no se comprueban.
+Los POST de `login.php`, `logout.php`, `create.php`, `edit.php`, `delete.php` y `restore.php` solo se aceptan si vienen del propio sitio: `reject_foreign_origin()` (en `app/Security/request-guard.php`) compara la cabecera `Origin` (o, si falta, `Referer`) con `APP_ORIGIN` y responde **403** si no coincide, si falta o si es `null`, **antes** de mirar lo que se envía (ni siquiera se valida el id ni los campos). Es una capa contra peticiones enviadas desde otras páginas; no sustituye al token CSRF del módulo M6. Los GET no se comprueban.
 
 - `APP_ORIGIN` es el origen público de la aplicación: **esquema + host + puerto**, sin ruta (`http://localhost:8080`, `https://sitio.com`).
 - Es opcional: por defecto se deriva de `APP_PORT` (`http://localhost:${APP_PORT}`). Fíjalo en `.env` si usas otro host o HTTPS.
@@ -222,7 +224,7 @@ El listado tiene un buscador: `index.php?q=texto`. Es una petición **GET**, as�
 - **Qué busca:** en nombre, apellido, nombre completo (`Laura Gómez`), correo y teléfono.
 - **Mayúsculas y tildes se ignoran:** `gomez`, `GÓMEZ` y `Gómez` encuentran lo mismo. Lo decide la collation de la tabla (`utf8mb4_unicode_ci`), no PHP.
 - **Los espacios repetidos se juntan** (`laura   gomez` equivale a `laura gomez`), el texto se recorta a 254 caracteres y lo que no sea texto (`?q[]=x`) cuenta como "sin búsqueda".
-- **`%`, `_` y `\` se buscan tal cual:** en `LIKE` son comodines, y `includes/user-search.php` los escapa para que `100%` encuentre `100%` y no todo. Esto exige que `sql_mode` de MySQL no incluya `NO_BACKSLASH_ESCAPES` (por defecto no lo incluye; `tests/smoke.sh` lo comprueba).
+- **`%`, `_` y `\` se buscan tal cual:** en `LIKE` son comodines, y `UserSearch::likePattern()` los escapa para que `100%` encuentre `100%` y no todo. Esto exige que `sql_mode` de MySQL no incluya `NO_BACKSLASH_ESCAPES` (por defecto no lo incluye; `tests/smoke.sh` lo comprueba).
 - **Sin resultados** responde **200** con el mensaje "No se encontraron resultados para «…»": la búsqueda se completó, simplemente no hay filas.
 - **Límite conocido:** una consulta `LIKE '%texto%'` no puede usar un índice y recorre la tabla (con 200.000 usuarios, ~230 ms): sin problema con cientos o miles de usuarios.
 
@@ -245,6 +247,25 @@ Cada usuario tiene tres campos más (mejora 3): `document`, `birth_date` y `role
 - **Rol:** obligatorio, uno de `user` (Usuario, el valor por defecto), `editor` o `admin`. Solo una **etiqueta**: no da ningún permiso hasta el inicio de sesión (mejora 5). La lista válida está en `user_roles()` y debe coincidir con el `ENUM` de la BD (una prueba de integración lo comprueba).
 - **Migración:** una BD que ya tiene datos recibe las columnas con `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/migrations/001-more-fields.sql`. Se aplica **una sola vez** (la segunda falla sin cambiar nada). Los usuarios existentes quedan con documento y fecha vacíos y rol `user`. Una instalación nueva ya trae las columnas por `01-schema.sql`: hay que mantener las dos cosas a la vez.
 - **Los envíos sin `role`** (por ejemplo con `curl`, como antes de esta mejora) responden 422.
+
+## Arquitectura (por capas)
+
+Cada pieza tiene **una sola responsabilidad** y no hace lo de las demás:
+
+| Capa | Dónde | Qué hace | Qué NO hace |
+|------|-------|----------|-------------|
+| Página | `public/*.php` | Arranca y llama a un método de un controlador (7 líneas) | Nada más |
+| Controlador | `app/Controller/` | Comprueba quién pide (origen, sesión, CSRF), lee la petición, llama al validador y al repositorio, elige la vista o la redirección | No tiene SQL ni HTML |
+| Validación | `app/Validation/UserValidator.php` | Campos y reglas de un usuario, **las mismas** al crear y al editar | No toca la BD ni la petición |
+| Repositorio | `app/Repository/` | **El único lugar con SQL**: buscar, contar, crear, actualizar, eliminar y restaurar | No sabe de HTTP ni de HTML |
+| Entidad | `app/Domain/User.php` | Los datos de un usuario, tipados e inmutables | No sabe de SQL |
+| Vista | `views/` | HTML con la mínima lógica, todo escapado | No consulta la BD ni lee la petición |
+
+- **Autoload (Composer):** `composer.json` define `App\` -> `app/` (PSR-4): una clase por archivo, y el nombre de la clase es su ruta. `bootstrap.php` carga `vendor/autoload.php`. `vendor/` no se sube a git: lo genera `composer install`, y el contenedor `php` lo hace solo al arrancar si falta (`docker/php/entrypoint.sh`).
+- **Inyección de dependencias:** `UserRepository` recibe el `PDO` en el constructor en lugar de crearlo o leer una variable global. Así no depende de cómo se conecta (las pruebas le dan una tabla temporal) y la dependencia es visible. `Container` construye las piezas; la conexión es **perezosa** (no se abre hasta que se pide un repositorio) porque hay peticiones que se rechazan sin tocar la BD (un id mal formado da 400 con la BD caída).
+- **Errores:** una consulta que falla lanza `PDOException`, una conexión imposible `DatabaseConnectionException` y un correo o documento repetido `DuplicateUserException`; el controlador las convierte con `Failure::describe()` (503, 500 y aviso sin detalles técnicos, el detalle va al log) o con el aviso del campo (409).
+- **Funciones que se quedaron como funciones** (`app/support.php`, `app/Security/`): `escape()`, `csrf_field()`, `require_login()`, `reject_foreign_origin()`... son ayudas de la petición y de las vistas que tocan `$_SESSION`, cabeceras y `exit`; en un framework serían *middleware*.
+- **Comprobado** con `src/tests/architecture.php` (ver «Pruebas»): si alguien pone SQL en una página o una vista sin `escape()`, falla.
 
 ## Usuarios y claves (desarrollo)
 
