@@ -34,7 +34,7 @@ El texto que ve el usuario final sigue en español.
 | 4 | Crear usuario (Create) | [x] |
 | 5 | Editar usuario (Update) | [x] |
 | 6 | Eliminar usuario (Delete) | [x] |
-| 7 | Revisión final del CRUD | [ ] |
+| 7 | Revisión final del CRUD | [x] |
 | M1 | Búsqueda y filtros | [ ] |
 | M2 | Paginación | [ ] |
 | M3 | Más campos | [ ] |
@@ -773,7 +773,7 @@ Provoca y resuelve:
   | A11 | El `confirm()` lleva un texto **fijo** (`¿Eliminar este usuario?`), sin el nombre; si llevara el nombre, se rompería con `O'Brien`. | Alta | ✔ `onsubmit="return confirm('¿Eliminar este usuario?');"`, texto fijo. |
   | A12 | Estructura simple: un `header.php` y un `footer.php` en `includes/`, sin parciales ni funciones compartidas de validación; el HTML del listado va entero en `index.php`. | Media | ✔ `includes/header.php` (14 líneas) y `includes/footer.php` (3 líneas); la tabla del listado va entera en `index.php`; sin parciales ni funciones compartidas. |
   | A13 | Los mensajes de éxito usan un arreglo `$mensajes` con la clave `msg` como lista blanca, igual que el mío. | Alta | ✔ `$mensajes` con `isset($mensajes[$msg])`. Matiz: con `?msg[]=x` esa línea lanza `TypeError: Cannot access offset of type array in isset or empty` (probado en el contenedor); mi versión lo valida con `is_string`. |
-  | A14 | Las 5 limitaciones de §9.1 serán, más o menos: sin inicio de sesión, sin CSRF, usuario `root` de BD, errores técnicos en pantalla y una quinta más (borrado definitivo o sin paginación). | Baja | — **No se puede comprobar con el zip:** las 5 limitaciones de §9.1 están en la guía (el PDF), que no está en el zip. El código sí tiene cuatro de las que predije (sin login, sin CSRF, `root` sin clave, errores técnicos en pantalla) y la quinta que adiviné (borrado definitivo, sin paginación); falta saber si esas son las de §9.1. |
+  | A14 | Las 5 limitaciones de §9.1 serán, más o menos: sin inicio de sesión, sin CSRF, usuario `root` de BD, errores técnicos en pantalla y una quinta más (borrado definitivo o sin paginación). | Baja | ~ **Con la guía a la vista (§9.1):** acerté **4 de 5 de lleno** (sin autenticación, sin CSRF, `root` de la BD y errores técnicos en pantalla). La quinta la repartí entre «borrado definitivo o sin paginación» y era **sin paginación**: la mitad de mi apuesta. Pesa poco como acierto, porque dos de las cuatro ya se deducían del plan (M5, M6 y M7 existían como mejoras). |
   | A15 | `htmlspecialchars()` escrito en línea, sin un helper, y posiblemente sin `ENT_QUOTES`. | Baja | ✔ `htmlspecialchars()` en línea en todo el zip, sin helper. Ninguna llamada pasa banderas (0 coincidencias de `ENT_QUOTES`): depende del valor por defecto, que escapa también las comillas simples solo desde PHP 8.1. |
 
   **B. Qué creo que hace mejor mi versión** (cada punto con la prueba que lo respalda)
@@ -808,7 +808,7 @@ Provoca y resuelve:
   6. **No existe ningún log.** Los errores solo existen en pantalla, y el visitante ve, con el `die()` de `conexion.php`, el usuario y el host de la BD.
   7. **Se lee de arriba abajo.** Es el punto fuerte que menos esperaba valorar: lógica arriba, vista abajo, 14 a 99 líneas por archivo. Las capas que añadí a cambio de robustez tienen un coste real de legibilidad (C1).
 
-  **Marcador final:** parte A: **14 de 15** (la A14 no se puede comprobar con el zip) · parte B: **5 confirmadas y 3 con matiz** de 8 (B2, B5 y B8) · parte C: **5 de 5** debilidades confirmadas. **Cómo leer el 14 de 15:** las predicciones de confianza alta se apoyaban en pistas que el propio plan ya daba sobre la guía, así que acertarlas demuestra poco; las que de verdad arriesgaban algo (A5, A8, A9 y A15; la A14 queda sin resolver) salieron bien en las cuatro comprobables.
+  **Marcador final:** parte A: **14 de 15 de lleno y 1 a medias** (la A14, que solo se pudo resolver al tener la guía: 4 de las 5 limitaciones y la quinta repartida entre dos opciones) · parte B: **5 confirmadas y 3 con matiz** de 8 (B2, B5 y B8) · parte C: **5 de 5** debilidades confirmadas. **Cómo leer el 14 de 15:** las predicciones de confianza alta se apoyaban en pistas que el propio plan ya daba sobre la guía, así que acertarlas demuestra poco; las que de verdad arriesgaban algo (A5, A8, A9 y A15) salieron bien, y la A14 quedó a medias.
 
 - [x] Ahora sí, descomprime `crud_usuarios.zip` en una carpeta temporal y **compara tu código con el original**: ¿qué hiciste diferente? ¿qué hace mejor cada versión?
     - **Cómo se hizo:** el zip (9 archivos, 12 KB, sin rutas sospechosas) se extrajo en una carpeta temporal nueva y se leyó entero. **Comparación estática: no se ejecutó nada del zip**; solo se probaron en el contenedor fragmentos del lenguaje (el `isset` con un arreglo, su regex de teléfono) y mi propia validación con nombres reales. Los resultados están en las tablas de predicciones de arriba.
@@ -856,13 +856,72 @@ Provoca y resuelve:
       | f | Teléfono con `type="text"` y sin `autocomplete` | **Aplicado, con un matiz** | `type="tel"` (teclado numérico en el móvil). Para `autocomplete` **no** se añadieron las pistas habituales (`given-name`, `email`, `tel`): este formulario guarda datos de **otra persona**, y esas pistas invitan al navegador a rellenar los del propio usuario. Se puso `autocomplete="off"` en los 4 campos. |
       | g | El mensaje de correo duplicado revela qué correos existen | **No aplicado, a propósito** | En este CRUD el mensaje **es necesario** (sin él no se sabe por qué falla el alta) y no revela nada que el listado no muestre ya a cualquiera. Solo importaría con registro o inicio de sesión públicos: se revisará en M5 (mensajes genéricos en el login). |
       | h | Dos personas editan al mismo usuario y gana la última | **Aplicado** | Control optimista sin tocar el esquema: el formulario lleva `row_token` (sha256 del contenido de la fila) y al guardar se compara con la fila actual; si cambió, **409** sin guardar nada, conservando lo escrito. 18 pasos de prueba en `smoke.sh` (A abre, B guarda, A recibe el conflicto, recarga y guarda; si B guarda los mismos valores no hay falso conflicto; token basura o arreglo). **Límite:** queda un margen de milisegundos entre la comprobación y el `UPDATE`; cerrarlo exigiría una columna de versión. Un envío sin `row_token` (`curl`) se acepta como antes. |
-- [ ] Lee otra vez la tabla de seguridad (Guía §9) y señala **en tu código** dónde se aplica cada medida.
-- [ ] Anota las 5 limitaciones de §9.1: son las mejoras que siguen.
-- [ ] Commit y etiqueta (`git tag v1-crud-base`).
+- [x] Lee otra vez la tabla de seguridad (Guía §9) y señala **en tu código** dónde se aplica cada medida.
+    - **Tabla de §9 aplicada a mi código** (líneas a fecha 2026-11-19; se verificó con una auditoría mecánica además de leer el código). Las seis medidas de la guía están, y mi proyecto añade algo en cada una:
+
+      | Amenaza | Medida de la guía | Dónde está en mi código | Qué añade mi proyecto | Comprobado con |
+      |---|---|---|---|---|
+      | Inyección SQL | Consultas preparadas con marcadores | `create.php:27` (`INSERT`), `edit.php:48` (`SELECT`) y `:70` (`UPDATE`), `delete.php:37` (`DELETE`). `index.php:13` y `status.php:27` son sentencias fijas sin datos del usuario | Prepares **reales**: `EMULATE_PREPARES => false` en `connection.php`, así que MySQL recibe la plantilla y los valores por separado | Auditoría: **0** sentencias interpolan variables |
+      | XSS | `htmlspecialchars()` en toda salida | `escape()` (`helpers.php:30`, con `ENT_QUOTES \| ENT_SUBSTITUTE` y UTF-8) en **34 de las 39** salidas `<?= ?>`; las otras 5 son cadenas constantes o un `count()`. Layout, parciales, `index.php`, `edit.php` | `ENT_SUBSTITUTE` (un UTF-8 inválido no vacía la salida); **CSP** sin scripts ni estilos en línea (el diálogo de eliminar viaja en `data-confirm`); `nosniff`. Como la defensa es escapar al mostrar, las reglas de nombres pudieron ser permisivas | Un nombre `<script>alert(1)</script>` sale como `&lt;script&gt;...`; `O'Brien "Pat" <b>Pérez</b>` no rompe el atributo; verificador de CSP sobre 7 páginas |
+      | Datos inválidos | Validación en el servidor con `filter_var` y regex | `user-validation.php`: `validate_user()` con `mb_strlen` (`:143`), regex del nombre (`:162`), `filter_var(... FILTER_VALIDATE_EMAIL, FILTER_FLAG_EMAIL_UNICODE)` (`:172`) y teléfono por dígitos reales (`:184`); la usan `create.php` y `edit.php` | Longitudes iguales a las columnas; correo en minúsculas; entrada que no es texto (`name[]=x`) tratada como vacía; **422** y no 200; se valida **antes** de abrir la BD | `src/tests/unit.php` (135 casos) |
+      | Borrado accidental o malicioso por URL | Eliminar solo por POST y confirmación en el navegador | `delete.php:11` responde **405** con `Allow: POST` a todo lo que no sea POST; formulario `method="post"` en `users-list.php:55`; confirmación con `data-confirm` + `js/confirm-submit.js` | **Comprobación de origen** (`reject_foreign_origin()`, 403), id validado antes de la BD (400), borrado idempotente (`msg=missing`). Se reconoce que `confirm()` es comodidad y **no** protección (un `curl` la salta) | `smoke.sh`: GET → 405, origen ajeno o ausente → 403; `confirm-submit.js` probado con `node` |
+      | Identificadores manipulados | `FILTER_VALIDATE_INT` | `parse_user_id()` (`user-validation.php:47`): `ctype_digit` + `filter_var(FILTER_VALIDATE_INT)` con rango 1 a 4294967295; la usan `edit.php:27` y `delete.php:26` | Cada usuario tiene **una sola URL** (rechaza `+14`, ` 14`, `014` y `?id[]=1`); id leído solo de la fuente que corresponde al método; **404** en editar y **400** en eliminar | unitarias (20 casos de id) y 10 variantes en `smoke.sh` |
+      | Duplicación al recargar | Patrón Post/Redirect/Get | `header('Location: ...'); exit;` en `create.php:34`, `edit.php:83` y `delete.php:45`, las tres operaciones de escritura | Si la BD falla **no** se redirige (503 o 500 con la misma página, no un 302 que oculte el fallo); si se reenvía el POST, el `UNIQUE` responde 409 (segunda línea de defensa) | Traza real: F5 repite el GET y no el POST |
+
+    - **Medidas que mi proyecto tiene y la tabla de la guía no menciona:** comprobación de origen en los tres POST; cabeceras de seguridad y CSP en nginx (y sin versión visible); credenciales por variables de entorno y un usuario de BD propio (ver §9.1); errores solo al log con aviso genérico (`describe_failure`); `APP_ENV` con PHP en modo seguro fuera de `local`; `status.php` solo en `local`; `expose_php` apagado; `integrity` (SRI) en las tres CDN; control de ediciones simultáneas (`row_token`); y un límite de 5 s para conectar a la BD.
+- [x] Anota las 5 limitaciones de §9.1: son las mejoras que siguen.
+    - **Las 5 limitaciones de §9.1 y su estado en mi proyecto** (2026-11-19). Dos siguen igual, una está reducida, una está resuelta y una está a medias:
+
+      | # | Limitación de la guía | Estado hoy | Mejora que la resuelve |
+      |---|---|---|---|
+      | 1 | **No hay autenticación**: cualquiera con la dirección ve, crea, edita y borra | **Sigue igual.** Nginx y Adminer solo escuchan en `127.0.0.1`, lo que limita *quién llega*, no *quién puede hacer qué* | **M5** inicio de sesión (sesión, `password_hash` y `password_verify`, `session_regenerate_id`, cookie `httponly` y `samesite`) |
+      | 2 | **No hay protección CSRF** | **Reducida, no cerrada.** La comprobación de origen en los tres POST bloquea los formularios de otros sitios, pero falta el token por sesión, que es la defensa estándar y cubre a los clientes que no envían esas cabeceras | **M6** token CSRF (`random_bytes`, `hash_equals`, campo oculto en todos los POST). Depende de M5 |
+      | 3 | **La base usa el usuario `root` sin contraseña** | **A medias.** La app **no** usa `root`: se conecta con `crud` (creado por `MYSQL_USER`), con clave y credenciales por variables de entorno, y la BD no se publica fuera de la red de Docker. Pero `SHOW GRANTS` da `GRANT ALL PRIVILEGES ON crud_usuarios.*`: ese usuario podría hacer `DROP TABLE` o `ALTER`, y la aplicación solo usa `SELECT`, `INSERT`, `UPDATE` y `DELETE` | **M7** usuario `crud_app` solo con DML y otro de migraciones. Aviso práctico: la prueba de `smoke.sh --with-db-stop` que renombra la tabla usa hoy esos privilegios de esquema; con M7 habrá que hacerla como `root` |
+      | 4 | **Los errores técnicos se muestran en pantalla** | **Resuelto.** Ninguna página imprime mensajes de excepción: aviso genérico y detalle al log (`describe_failure`, `log_exception`). `display_errors` está apagado salvo con `APP_ENV=local` (`php.local.ini` por `PHP_INI_SCAN_DIR`); en producción un fallo grave responde 500 con el cuerpo vacío | Hecho antes de tiempo: era el complemento de M7 |
+      | 5 | **No hay paginación**: con miles de usuarios se vuelve lento | **Sigue igual, y ahora medido** (mediana de 3 peticiones): 3 usuarios, 3 ms y 5 KB; 1.000, 16 ms y 1,0 MB; 5.000, 72 ms y 5,1 MB; 20.000, **278 ms y 20,5 MB de HTML** (20.004 filas `<tr>`) y 11,6 MB de memoria en PHP. **Matiz:** lo que se vuelve lento no es PHP ni MySQL, es enviar y pintar el HTML en el navegador | **M2** paginación (`LIMIT`, `COUNT(*)` y enlaces de página); **M1** búsqueda ayuda al mismo problema |
+
+    - **Orden sugerido para lo que sigue:** **M7** es lo más pequeño (un `GRANT` y una prueba negativa), después **M2** (paginación, independiente de lo demás), y **M5** antes que **M6**, porque el token CSRF vive en la sesión.
+- [x] Commit y etiqueta (`git tag v1-crud-base`).
+    - **Hecho (2026-11-19):** commit `c808f47` («MVP 7: revision final: fechas UTC, CSP, origen en POST y pruebas», 26 archivos) y etiqueta anotada `v1-crud-base` («CRUD base: MVP 0 a 7») sobre ese mismo commit. **Aclaración sobre la etiqueta:** apunta al commit del **código**; la respuesta de la pregunta de comprobación, la tabla de §9 y las 5 limitaciones de §9.1 se escribieron después y quedan en un commit posterior que solo toca `plan.md` (se comprobó que ningún archivo de código cambió después de la etiqueta). Como la etiqueta no se ha publicado en ningún remoto, también se podría mover para incluir ese commit de documentación, pero mover una etiqueta reescribe su historia y no hace falta: el código marcado como v1 es exactamente el mismo.
 
 ### Preguntas de comprobación
 
 Dibuja de memoria el recorrido de una petición "crear usuario" (navegador → nginx → php-fpm → MySQL → respuesta → redirección) y explica en qué punto actúa cada medida de seguridad.
+
+**Respuesta: recorrido de una petición «crear usuario».** Comprobado paso a paso con `curl -i` el 2026-11-19 (los códigos y las cabeceras de abajo son los que salieron de verdad). Entre corchetes, dónde ocurre cada paso; en **negrita**, la medida que actúa.
+
+*Primero, pedir el formulario (GET):*
+
+1. **[Navegador]** El usuario pulsa «Registrar usuario» y el navegador envía `GET /create.php`. Antes de pintar nada, la **CSP** limita de dónde puede cargar scripts y estilos (solo el propio sitio y `cdn.jsdelivr.net`, y con `integrity` en las tres CDN), y `form-action 'self'` limita adónde puede enviar el formulario.
+2. **[nginx]** Recibe la petición (solo en `127.0.0.1:8080`, no es accesible desde la red local). La regla `location ~ \.php$` la pasa por FastCGI a `php:9000`. Al devolver **cualquier** respuesta, también las de error, añade las **cabeceras de seguridad** (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Permissions-Policy` y la CSP) y no revela su versión (`Server: nginx`).
+3. **[php-fpm]** `create.php` ve que no es un POST y pinta el formulario vacío con el parcial `user-form.php`. Todo lo que imprime pasa por **`escape()`**; los atributos (`maxlength`, `required`, `type="email"`, `type="tel"`) ayudan al usuario, pero **no** son seguridad. `php.ini` oculta la versión de PHP y, fuera de `APP_ENV=local`, no muestra errores.
+
+*Después, enviarlo (POST):*
+
+4. **[Navegador]** El usuario envía el formulario: `POST /create.php` con el cuerpo `name=...&last_name=...&email=...&phone=...`. El navegador añade solo la cabecera **`Origin`**, que un script de otra página no puede falsificar (un cliente que no sea un navegador sí, pero no trae la sesión de nadie).
+5. **[nginx]** Mismo trayecto que el paso 2.
+6. **[php-fpm]** `create.php` hace estas comprobaciones **en este orden**, y cada una puede cortar la petición:
+   1. **Comprobación de origen:** `reject_foreign_origin()` compara `Origin` (o `Referer`) con `APP_ORIGIN`, con igualdad estricta entre orígenes normalizados. Si no coincide, falta o es `null`: **403** en texto plano y no se mira nada más (ni el cuerpo ni la BD). Si `APP_ORIGIN` está mal configurado: **500** y `[config]` en el log.
+   2. **Limpieza:** `read_user_input()` toma solo las claves definidas, trata como vacío lo que no sea texto (`name[]=x`), aplica `trim` y pasa el correo a minúsculas.
+   3. **Validación en el servidor:** `validate_user()` comprueba nombre y apellido (al menos una letra, sin caracteres de control, hasta 100), correo (`FILTER_VALIDATE_EMAIL`, hasta 254) y teléfono (de 7 a 15 dígitos reales, hasta 20). Si algo falla: **422**, se salta la BD y se salta al paso 12.
+   4. **Conexión:** `connection.php` abre PDO con credenciales **del entorno** (un usuario con permisos solo sobre su base), `charset=utf8mb4`, excepciones activadas, consultas preparadas de verdad (`EMULATE_PREPARES` apagado), sesión de MySQL en UTC y un límite de 5 s para conectar. Si no hay conexión: `DatabaseConnectionException` → **503** con un aviso genérico, y el detalle va solo al log (`[connection]`).
+   5. **INSERT preparado:** `prepare()` envía a MySQL **solo la plantilla** (`VALUES (:name, :last_name, :email, :phone)`), que fija la estructura de la consulta; `execute()` envía **después** los valores como datos, que MySQL nunca interpreta como SQL. Es lo que impide la inyección SQL. El teléfono vacío viaja como `NULL`.
+7. **[MySQL / InnoDB]** Comprueba el índice **`UNIQUE KEY unique_email`** dentro del propio `INSERT`, de forma atómica y sin un `SELECT` previo (así dos peticiones simultáneas no pueden duplicar un correo). La colación `utf8mb4_unicode_ci` no distingue mayúsculas, por eso `TRAZA-1@Example.com` choca con `traza-1@example.com`. Si el correo ya existe devuelve el **error 1062**; si no, guarda la fila con `created_at` en UTC.
+8. **[php-fpm]** Interpreta el resultado:
+   - **1062:** se detecta con `errorInfo[1] === 1062` (no con el `23000` genérico, que agrupa cualquier violación de integridad) → **409 Conflict** y el mensaje «Ya existe un usuario registrado con ese correo.» bajo el campo del correo (no se registra como error: es un caso normal).
+   - **Cualquier otro fallo de la consulta:** `describe_failure()` → **500**, aviso genérico y `[query]` en el log.
+   - **Éxito:** `header('Location: index.php?msg=created')` seguido de `exit`. Es el patrón **Post/Redirect/Get (PRG)**: la respuesta al POST no es una página, es una redirección.
+
+*Y la respuesta y la redirección:*
+
+9. **[nginx]** Devuelve la respuesta de PHP añadiéndole otra vez las cabeceras de seguridad: `302 Found` con `Location: index.php?msg=created` (o el 403, 409, 422, 500 o 503 de los pasos anteriores).
+10. **[Navegador]** Sigue la redirección con un `GET /index.php?msg=created`. Si el usuario recarga la página (F5), el navegador repite **ese GET**, no el POST: por eso no se crea un duplicado.
+11. **[php-fpm]** `index.php` valida `msg` contra una **lista blanca** (`is_string` y `array_key_exists`, así que `?msg[]=x` o un valor raro no muestran nada), consulta con una sentencia fija y pinta el listado: cada dato pasa por **`escape()`**, la fecha se convierte de UTC a la zona de la aplicación y el diálogo de eliminar viaja en un `data-confirm` escapado, sin scripts ni estilos en línea (compatible con la CSP).
+12. **[php-fpm]** *Si en el paso 6.3 u 8 hubo un error*, la misma respuesta (422, 409, 500 o 503) **vuelve a pintar el formulario** con lo que el usuario había escrito: `value="<?= escape(...) ?>"` hace que un `<script>alert(1)</script>` salga como `&lt;script&gt;alert(1)&lt;/script&gt;` (comprobado), y los mensajes de error también se escapan. El visitante ve un mensaje genérico; el detalle técnico nunca sale de los logs.
+
+**Dónde actúa cada medida que pedía la pregunta:** cabeceras de nginx → pasos 2, 5 y 9 (en toda respuesta) · comprobación de origen → 6.1 · validación → 6.3 · `INSERT` preparado → 6.5 · error 1062 → 7 y 8 · PRG → 8 a 10 · `escape()` → 3, 11 y 12.
+
+**Lo que todavía NO actúa en este recorrido:** el **token CSRF** (M6, necesita sesión), el **inicio de sesión** (M5: hoy cualquiera puede crear usuarios), la limitación de peticiones por visitante y el `confirm()` del navegador (solo existe al eliminar, y es comodidad, no protección).
 
 ---
 
@@ -979,7 +1038,8 @@ Orden recomendado (de menor a mayor dificultad). Cada mejora se hace en una rama
 - [ ] **Prueba negativa:** como `crud_app`, intenta `DROP TABLE users;` o `ALTER TABLE`. Debe ser rechazado.
 - [ ] Reto: automatizar la creación del usuario en `database/` para instalaciones nuevas. Investiga por qué un `.sql` no puede leer variables de entorno y qué alternativa ofrece la imagen de MySQL (scripts `.sh` en `docker-entrypoint-initdb.d`).
 - [ ] Separa dos usuarios: uno de **aplicación** (solo DML) y uno de **migraciones** (permisos de esquema) que solo usas manualmente. Razona por qué.
-- [ ] Complemento (Guía §9.1, errores técnicos en pantalla): usa `APP_ENV` para decidir si se muestran detalles de error (`local`, valor del proyecto en `.env`) o solo un mensaje genérico con registro en log (`production`). Revisa dónde tu código imprime `$e->getMessage()`.
+- [x] Complemento (Guía §9.1, errores técnicos en pantalla): usa `APP_ENV` para decidir si se muestran detalles de error (`local`, valor del proyecto en `.env`) o solo un mensaje genérico con registro en log (`production`). Revisa dónde tu código imprime `$e->getMessage()`.
+    - **Hecho antes de tiempo (2026-11-19):** `php.ini` es seguro por defecto y `php.local.ini` solo se carga con `APP_ENV=local` mediante `PHP_INI_SCAN_DIR`; las páginas nunca imprimen mensajes de excepción (`describe_failure`). Probado en los dos entornos: en `local` el fatal se ve, en `production` responde 500 con el cuerpo vacío y el detalle queda en el log. Detalles en la tabla de menores (c) de 7.3.
 
 **Preguntas:** ¿qué es el mínimo privilegio? ¿por qué `root` sin contraseña es aceptable en XAMPP local y nunca en producción?
 

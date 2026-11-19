@@ -19,7 +19,7 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | MVP 4. Crear (Create) | Hecho |
 | MVP 5. Editar (Update) | Hecho |
 | MVP 6. Eliminar (Delete) | Hecho |
-| MVP 7. Revisión | En curso |
+| MVP 7. Revisión | Hecho (etiqueta `v1-crud-base`) |
 | Mejoras 1 a 8 | Pendientes |
 
 ## Qué se construye
