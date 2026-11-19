@@ -7,7 +7,8 @@ services:
         HOST_GID: ${HOST_GID:-1000}
     volumes:
       - ./src:/var/www/html
-    # Solo las variables que PHP necesita (sin DB_ROOT_PASSWORD).
+    # Solo las variables que PHP necesita: ni DB_ROOT_PASSWORD ni las del usuario de migraciones (si la aplicación
+    # las conociera, comprometerla daría permisos de esquema; ver bin/as-migrator).
     # Docker Compose las toma del archivo .env.
     environment:
       APP_ENV: ${APP_ENV:-local}
@@ -47,8 +48,12 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_DATABASE}
-      MYSQL_USER: ${DB_USERNAME}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
+      # Sin MYSQL_USER/MYSQL_PASSWORD: la imagen daría ALL sobre la base a ese usuario. Los usuarios se crean con
+      # permisos mínimos en database/03-users.sh, que lee estas variables (ver ahí qué puede hacer cada uno).
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_MIGRATION_USERNAME: ${DB_MIGRATION_USERNAME:-crud_migrator}
+      DB_MIGRATION_PASSWORD: ${DB_MIGRATION_PASSWORD:?Falta DB_MIGRATION_PASSWORD en .env (ver .env.example)}
     volumes:
       - db_data:/var/lib/mysql
       - ./database:/docker-entrypoint-initdb.d:ro

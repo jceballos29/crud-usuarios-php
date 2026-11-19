@@ -5,12 +5,15 @@ declare(strict_types=1);
 /**
  * Pruebas de integración: las consultas de búsqueda y paginación contra MySQL de verdad.
  *
- *     docker compose exec php php tests/integration.php
+ *     bin/as-migrator php tests/integration.php
+ *
+ * Se ejecuta con el usuario de MIGRACIONES de la BD (no con el de la aplicación): necesita CREATE TEMPORARY TABLES
+ * y la aplicación, por mínimo privilegio, no lo tiene (ver database/03-users.sh y bin/as-migrator).
  *
  * No tocan tus datos: crean una tabla `users` TEMPORAL en esta misma conexión, que oculta a la real
  * mientras dura la sesión, no consume su AUTO_INCREMENT y desaparece sola al desconectar. Por eso los
  * recuentos son exactos y no dependen de los usuarios que haya. Requiere el permiso CREATE TEMPORARY
- * TABLES (el usuario `crud` lo tiene hoy; con el mínimo privilegio de M7 habría que dárselo).
+ * TABLES.
  * Sale con 0 si todo pasa y con 1 si algo falla.
  */
 

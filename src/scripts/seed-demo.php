@@ -5,9 +5,9 @@ declare(strict_types=1);
 /**
  * Inserta usuarios de demostración para probar el listado (paginación, búsqueda...).
  *
- *     docker compose exec php php scripts/seed-demo.php            # 35 usuarios
- *     docker compose exec php php scripts/seed-demo.php 120        # 120 usuarios
- *     docker compose exec php php scripts/seed-demo.php --clean    # borra los de demostración
+ *     bin/as-migrator php scripts/seed-demo.php            # 35 usuarios
+ *     bin/as-migrator php scripts/seed-demo.php 120        # 120 usuarios
+ *     bin/as-migrator php scripts/seed-demo.php --clean    # borra los de demostración
  *
  * Todos llevan el correo demo-NNN@example.com, así que son fáciles de reconocer y de borrar, y es
  * idempotente: ejecutarlo dos veces no duplica (el correo es UNIQUE y se usa INSERT IGNORE). Los

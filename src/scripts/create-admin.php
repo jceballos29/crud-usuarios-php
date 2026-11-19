@@ -5,9 +5,13 @@ declare(strict_types=1);
 /**
  * Crea un administrador (quien puede iniciar sesión en la aplicación). Solo consola:
  *
- *     docker compose exec php php scripts/create-admin.php correo@ejemplo.com          # pide la contraseña
- *     docker compose exec -T php php scripts/create-admin.php correo@ejemplo.com < clave.txt   # la lee de la entrada
- *     docker compose exec php php scripts/create-admin.php correo@ejemplo.com 'la-clave'      # por argumento (¡ver abajo!)
+ *     bin/as-migrator php scripts/create-admin.php correo@ejemplo.com          # pide la contraseña
+ *     bin/as-migrator php scripts/create-admin.php correo@ejemplo.com < clave.txt   # la lee de la entrada
+ *     bin/as-migrator php scripts/create-admin.php correo@ejemplo.com 'la-clave'      # por argumento (¡ver abajo!)
+ *
+ * Se ejecuta con bin/as-migrator (el usuario de MIGRACIONES de la BD) y no con `docker compose exec php ...`: la
+ * aplicación se conecta con un usuario que, por mínimo privilegio, NO puede insertar administradores (database/03-users.sh).
+ * Así, aunque alguien lograra ejecutar SQL desde la aplicación, no podría darse de alta como administrador.
  *
  * Por qué un script y no un formulario de registro: quien se registrara solo podría administrar a todos.
  * Los administradores los crea quien tiene acceso al servidor.
@@ -76,6 +80,11 @@ try {
 } catch (RuntimeException $error) {
     if ($error instanceof PDOException && ($error->errorInfo[1] ?? null) === 1062) {
         fwrite(STDERR, "Error: ya existe un administrador con ese correo.\n");
+        exit(1);
+    }
+
+    if ($error instanceof PDOException && in_array($error->errorInfo[1] ?? null, [1142, 1044], true)) {
+        fwrite(STDERR, "Error: el usuario de la BD de la aplicación no puede insertar administradores (es lo esperado).\nEjecútalo con el usuario de migraciones: bin/as-migrator php scripts/create-admin.php <correo>\n");
         exit(1);
     }
 

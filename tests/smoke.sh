@@ -5,7 +5,8 @@
 #   tests/smoke.sh                  # no toca los contenedores
 #   tests/smoke.sh --with-db-stop   # además PARA y vuelve a levantar la BD para comprobar los 503
 #
-# Requisitos: la aplicación levantada (docker compose up -d), curl y Docker Compose.
+# Requisitos: la aplicación levantada (docker compose up -d), curl y Docker Compose. Usa el usuario de MIGRACIONES
+# de la BD (DB_MIGRATION_*, ver database/03-users.sh) para preparar y limpiar datos.
 # Variables opcionales: BASE_URL (por defecto http://localhost:APP_PORT) y ORIGIN (por defecto BASE_URL;
 # debe coincidir con APP_ORIGIN).
 #
@@ -26,7 +27,9 @@ PASS=0
 FAIL=0
 
 # --default-character-set=utf8mb4: el cliente mysql de la consola habla latin1 por defecto y mostraría las tildes rotas.
-sql() { printf '%s\n' "$1" | docker compose exec -T db sh -c 'mysql -N --default-character-set=utf8mb4 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' 2>/dev/null; }
+# sql() consulta la BD como el usuario de MIGRACIONES (M7): la aplicación ya no puede borrar filas ni cambiar el esquema,
+# y esta prueba necesita preparar y limpiar datos (DELETE) y cambiar tablas (RENAME) por su cuenta.
+sql() { printf '%s\n' "$1" | docker compose exec -T db sh -c 'mysql -N --default-character-set=utf8mb4 -u"$DB_MIGRATION_USERNAME" -p"$DB_MIGRATION_PASSWORD" "$MYSQL_DATABASE"' 2>/dev/null; }
 cleanup() { sql "RENAME TABLE users_tmp TO users;" >/dev/null 2>&1; sql "DELETE FROM users WHERE email LIKE 'smoke-%@example.com';" >/dev/null 2>&1; sql "DELETE FROM admins WHERE email LIKE 'smoke-%@example.com';" >/dev/null 2>&1; rm -rf "$TMP"; }
 trap cleanup EXIT
 
@@ -78,7 +81,7 @@ sql "DELETE FROM users WHERE email LIKE 'smoke-%@example.com';" >/dev/null
 sql "DELETE FROM admins WHERE email LIKE 'smoke-%@example.com';" >/dev/null
 # Un administrador de prueba con una contraseña al azar (solo existe durante la prueba), por la entrada estándar.
 ADMIN_PW="smoke-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-printf '%s\n' "$ADMIN_PW" | docker compose exec -T php php scripts/create-admin.php smoke-admin@example.com >/dev/null 2>&1 \
+printf '%s\n' "$ADMIN_PW" | bin/as-migrator php scripts/create-admin.php smoke-admin@example.com >/dev/null 2>&1 \
     || { echo "No se pudo crear el administrador de prueba (¿está aplicada la migración 003?)." >&2; exit 2; }
 login_jar "$JAR"
 CSRF=$LTOKEN   # el token de la sesión del administrador de prueba: lo llevan todos los POST de abajo

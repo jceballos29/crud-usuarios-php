@@ -26,7 +26,8 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | Mejora 4. Borrado lógico | Hecha (rama `mejora-4-borrado-logico`) |
 | Mejora 5. Inicio de sesión | Hecha (rama `mejora-5-login`) |
 | Mejora 6. Tokens CSRF | Hecha (rama `mejora-6-csrf`) |
-| Mejoras 7 y 8 | Pendientes |
+| Mejora 7. Usuario de BD con mínimo privilegio | Hecha (rama `mejora-7-minimo-privilegio`) |
+| Mejora 8 | Pendiente |
 
 ## Qué se construye
 
@@ -93,15 +94,15 @@ Nginx y Adminer solo se publican en `127.0.0.1`: no son accesibles desde la red 
 Requisitos: Docker, Docker Compose y Git.
 
 ```bash
-cp .env.example .env     # y cambia al menos las claves (DB_PASSWORD y DB_ROOT_PASSWORD); el resto del ejemplo ya funciona
+cp .env.example .env     # trae claves de DESARROLLO que ya funcionan (ver «Usuarios y claves» abajo); cámbialas fuera de tu máquina
 docker compose up -d --build
 docker compose ps        # los 4 servicios en running; db en healthy
 ```
 
-- **Entrar:** http://localhost:8080/login.php. Una instalación nueva trae un administrador de **desarrollo** (`database/02-seed.sql`): correo `admin@example.com`, contraseña `Admin-Demo-2026`. Es una cuenta de demostración con una clave conocida: bórrala fuera de tu máquina (`DELETE FROM admins WHERE email = 'admin@example.com'`).
-- **Crear tu propio administrador:** `docker compose exec php php scripts/create-admin.php correo@ejemplo.com` (pide la contraseña, de 10 a 72 bytes, sin mostrarla). En una BD que ya existía, aplica antes la migración `003-admins.sql`; el administrador de desarrollo no se crea solo (el seed solo corre con el volumen vacío): para añadirlo, ejecuta a mano su `INSERT IGNORE` de `database/02-seed.sql`.
+- **Entrar:** http://localhost:8080/login.php. Una instalación nueva trae un administrador de **desarrollo** (`database/02-seed.sql`): correo `admin@example.com`, contraseña `Admin-Demo-2026` (todas las cuentas de desarrollo están en «Usuarios y claves»). Es una cuenta de demostración con una clave conocida: bórrala fuera de tu máquina (`DELETE FROM admins WHERE email = 'admin@example.com'`).
+- **Crear tu propio administrador:** `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com` (pide la contraseña, de 10 a 72 bytes, sin mostrarla). En una BD que ya existía, aplica antes la migración `003-admins.sql`; el administrador de desarrollo no se crea solo (el seed solo corre con el volumen vacío): para añadirlo, ejecuta a mano su `INSERT IGNORE` de `database/02-seed.sql`.
 - Diagnóstico del stack: http://localhost:8080/status.php (solo con `APP_ENV=local`; en cualquier otro entorno responde 404 para no revelar versiones)
-- Adminer: http://localhost:8081 (sistema MySQL, servidor `db`, credenciales de `.env`)
+- Adminer: http://localhost:8081 (sistema MySQL, servidor `db`; usuario y clave: ver «Usuarios y claves»)
 
 > El script SQL de `database/` solo se ejecuta cuando el volumen de MySQL está vacío.
 > Si cambias el esquema, las claves de `.env` o `02-seed.sql`, recrea la BD:
@@ -114,8 +115,10 @@ docker compose ps        # los 4 servicios en running; db en healthy
 | Ver logs (todos / PHP) | `docker compose logs -f` / `docker compose logs -f php` |
 | Shell en PHP | `docker compose exec php sh` |
 | Comprobar conexión a MySQL | `docker compose exec php php scripts/db-check.php` |
+| Comando en PHP **como usuario de migraciones** (crear administradores, datos de demostración, pruebas de integración) | `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com` |
 | Pruebas unitarias (sin BD) | `docker compose exec php php tests/unit.php` |
 | Pruebas de punta a punta | `tests/smoke.sh` (añade `--with-db-stop` para parar y levantar la BD) |
+| Pruebas de permisos de la BD | `tests/privileges.sh` |
 | Composer | `docker compose exec php composer <comando>` |
 | Ejecutar un `.sql` como root | `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < archivo.sql` |
 | Apagar (conserva datos) | `docker compose down` |
@@ -126,7 +129,8 @@ docker compose ps        # los 4 servicios en running; db en healthy
 Hay cuatro niveles y no necesitan instalar nada más que lo que ya usa el proyecto:
 
 - **Unitarias** (`src/tests/unit.php`): las funciones puras (validación, id, origen, fechas, escape, búsqueda, paginación). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
-- **De integración** (`src/tests/integration.php`): las consultas de búsqueda y paginación contra MySQL, sobre una tabla temporal que no toca tus datos. `docker compose exec php php tests/integration.php`.
+- **De integración** (`src/tests/integration.php`): las consultas de búsqueda y paginación contra MySQL, sobre una tabla temporal que no toca tus datos. `bin/as-migrator php tests/integration.php` (necesita el usuario de migraciones: crea tablas temporales).
+- **De permisos** (`tests/privileges.sh`): habla con MySQL como el usuario de la aplicación y el de migraciones y comprueba qué puede y qué NO puede hacer cada uno (`DROP`, `ALTER`, `DELETE`, `GRANT`, leer `mysql.user`...), y que `database/03-users.sh` es repetible y corrige a un usuario con demasiados permisos.
 - **De las migraciones** (`tests/migration-001.sh`, `-002.sh` y `-003.sh`): aplican `database/migrations/` a una BD temporal con el esquema anterior y comprueban que acaba igual que una instalación nueva. Usan root y borran sus bases temporales.
 - **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, origen en los tres POST, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
 
@@ -141,14 +145,19 @@ crud-usuarios-docker/
 ├── docker-compose.yml       # Servicios: php, nginx, db, adminer
 ├── .env / .env.example      # Variables (.env no se sube a git)
 ├── docker/                  # Dockerfile de PHP, php.ini (seguro), php.local.ini (solo desarrollo), xdebug.ini, nginx (cabeceras y CSP)
+├── bin/
+│   └── as-migrator          # Ejecuta un comando en PHP conectado a la BD como usuario de migraciones (M7)
 ├── tests/
 │   ├── smoke.sh             # Pruebas de punta a punta con curl
 │   ├── migration-001.sh     # Prueba de la migración 001 con bases temporales
 │   ├── migration-002.sh     # Prueba de la migración 002
 │   ├── migration-003.sh     # Prueba de la migración 003
+│   ├── privileges.sh        # Permisos de la BD: qué puede y qué no puede cada usuario (M7)
 │   └── csrf-demo/           # Página «atacante» y guía para ver CSRF en el navegador (M6)
 ├── database/
 │   ├── 01-schema.sql        # Tabla users (instalación nueva)
+│   ├── 02-seed.sql          # 3 usuarios de prueba y el administrador de desarrollo
+│   ├── 03-users.sh          # Crea los usuarios de la BD con mínimo privilegio (aplicación y migraciones), con las claves de .env
 │   ├── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql, 002-active.sql, 003-admins.sql)
 │   └── 02-seed.sql          # SET NAMES utf8mb4 + 3 usuarios de prueba
 └── src/                     # Montado en /var/www/html
@@ -225,7 +234,7 @@ El listado muestra 10 usuarios por página: `index.php?page=2` (y `index.php?q=l
 - **El estado se conserva:** los enlaces de página, «Editar», «Cancelar» y el regreso tras guardar o eliminar llevan la búsqueda y la página. Si se elimina al último usuario de la última página se muestra la nueva última, no una vacía. Crear vuelve a la página 1.
 - **Rendimiento (medido con 200.000 usuarios):** una página lejana (`OFFSET 190000`) cuesta ~60 ms, y un `COUNT(*)` ~23 ms sin búsqueda o ~230 ms con ella. La paginación por clave (`WHERE id < :último`) sería ~0,3 ms siempre, pero no permite saltar a una página ni numerarlas.
 - **`LIMIT` y `OFFSET`** se enlazan con `PDO::PARAM_INT` (`bind_all()`): con consultas nativas MySQL perdona un texto, con emuladas no.
-- **Datos de demostración:** `docker compose exec php php scripts/seed-demo.php 35` crea 35 usuarios `demo-NNN@example.com`; `--clean` los borra.
+- **Datos de demostración:** `bin/as-migrator php scripts/seed-demo.php 35` crea 35 usuarios `demo-NNN@example.com`; `--clean` los borra.
 
 ## Documento, fecha de nacimiento y rol
 
@@ -236,6 +245,30 @@ Cada usuario tiene tres campos más (mejora 3): `document`, `birth_date` y `role
 - **Rol:** obligatorio, uno de `user` (Usuario, el valor por defecto), `editor` o `admin`. Solo una **etiqueta**: no da ningún permiso hasta el inicio de sesión (mejora 5). La lista válida está en `user_roles()` y debe coincidir con el `ENUM` de la BD (una prueba de integración lo comprueba).
 - **Migración:** una BD que ya tiene datos recibe las columnas con `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/migrations/001-more-fields.sql`. Se aplica **una sola vez** (la segunda falla sin cambiar nada). Los usuarios existentes quedan con documento y fecha vacíos y rol `user`. Una instalación nueva ya trae las columnas por `01-schema.sql`: hay que mantener las dos cosas a la vez.
 - **Los envíos sin `role`** (por ejemplo con `curl`, como antes de esta mejora) responden 422.
+
+## Usuarios y claves (desarrollo)
+
+Estas son las cuentas que trae una instalación nueva (`.env.example` y `database/`). **Son claves de desarrollo conocidas: cámbialas o bórralas fuera de tu máquina.**
+
+| Cuenta | Para qué | Usuario | Clave | Dónde se define |
+|--------|----------|---------|-------|-----------------|
+| Administrador de la aplicación | Entrar en `http://localhost:8080/login.php` | `admin@example.com` | `Admin-Demo-2026` | `database/02-seed.sql` |
+| Usuario de BD **de la aplicación** | Lo usa PHP en cada petición. Solo lee y escribe filas | `crud_app` | `crud_app_dev_2026` | `DB_USERNAME`/`DB_PASSWORD` en `.env` |
+| Usuario de BD **de migraciones** | Cambiar el esquema y tareas manuales (`bin/as-migrator`, pruebas) | `crud_migrator` | `crud_migrator_dev_2026` | `DB_MIGRATION_USERNAME`/`DB_MIGRATION_PASSWORD` en `.env` |
+| `root` de MySQL | Administrar el servidor (crear usuarios, bases de prueba) | `root` | `cambia-esta-clave-root` | `DB_ROOT_PASSWORD` en `.env` |
+
+Los dos usuarios de BD los crea `database/03-users.sh` (con las claves de `.env`) cuando se crea el volumen de MySQL; ese script se puede volver a ejecutar sin riesgo (`docker compose exec db bash /docker-entrypoint-initdb.d/03-users.sh`), por ejemplo tras cambiar una clave o en una BD que ya existía.
+
+## Mínimo privilegio en la base de datos
+
+La aplicación **no se conecta con un usuario que lo pueda todo**: si algún día hubiera una inyección SQL, el daño se limita a lo que el usuario de la BD puede hacer.
+
+- **Aplicación** (`DB_USERNAME`): `users` → `SELECT`, `INSERT`, `UPDATE`; `admins` → `SELECT` y `UPDATE(password_hash)`. **No puede** `DELETE` (eliminar es un `UPDATE`: borrado lógico), ni insertar administradores, ni `DROP`/`ALTER`/`TRUNCATE`/`CREATE`, ni tablas temporales, ni leer `mysql.user`, ni tocar otras bases.
+- **Migraciones** (`DB_MIGRATION_USERNAME`): todos los privilegios sobre `crud_usuarios`, y nada más (sin `GRANT OPTION`, sin otras bases). Se usa **a mano**: `bin/as-migrator <comando>` ejecuta un comando en el contenedor `php` con esa cuenta (crear administradores, `seed-demo.php`, las pruebas de integración) sin dejar que el contenedor la conozca: la aplicación web y `docker compose exec php ...` siguen con el usuario de la aplicación. Las migraciones de `database/migrations/` se aplican con `root` (`docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < ...`) o con el usuario de migraciones.
+- **Por qué dos usuarios:** quien puede cambiar el esquema no es quien atiende a Internet. La cuenta que se expone en cada petición es la que más probabilidades tiene de verse comprometida, así que debe poder hacer lo mínimo; la de migraciones solo existe cuando tú la usas.
+- **Borrado definitivo:** como la aplicación no puede `DELETE`, borrar de verdad a alguien (derecho de supresión) se hace con el usuario de migraciones o `root`.
+- **Si cambias las claves en `.env`** después del primer arranque, MySQL conserva las anteriores hasta que ejecutes `03-users.sh` (que las actualiza) o `docker compose down -v` (borra los datos). Con una BD que ya existía, añade `DB_MIGRATION_PASSWORD` a `.env` (si falta, `docker compose` lo avisa) y ejecuta `03-users.sh`.
+- **Probado** con `tests/privileges.sh` (60 comprobaciones).
 
 ## Inicio de sesión
 
@@ -329,7 +362,7 @@ Códigos que devuelve la aplicación (regla: si el envío no se completó, nunca
 
 **Error de conexión o puerto ocupado.**
 - `php` espera a que MySQL esté sano (`healthcheck`); el primer arranque puede tardar. Revisa `docker compose ps` y `docker compose logs db`.
-- Si cambias las credenciales en `.env` después del primer arranque, MySQL conserva las anteriores: `docker compose down -v` (**borra los datos**).
+- Si cambias las credenciales en `.env` después del primer arranque, MySQL conserva las anteriores: ejecuta `docker compose exec db bash /docker-entrypoint-initdb.d/03-users.sh` (actualiza las claves de los usuarios de la aplicación y de migraciones) o `docker compose down -v` (**borra los datos**). La clave de `root` solo se cambia con `down -v`.
 - Si `8080` u `8081` están ocupados, cambia `APP_PORT` o `ADMINER_PORT` en `.env`.
 - Si cambias una variable de `.env`, recrea los contenedores con `docker compose up -d`.
 
