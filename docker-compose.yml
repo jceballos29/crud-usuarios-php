@@ -11,6 +11,9 @@ services:
     # Docker Compose las toma del archivo .env.
     environment:
       APP_ENV: ${APP_ENV:-local}
+      # Origen público de la aplicación (esquema + host + puerto). Lo usa delete.php para aceptar
+      # solo peticiones que vienen de este sitio. Por defecto se deriva de APP_PORT.
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:${APP_PORT:-8080}}
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       DB_DATABASE: ${DB_DATABASE}

@@ -17,9 +17,9 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | MVP 2. Conexión PDO y manejo de errores | Hecho |
 | MVP 3. Listar (Read) | Hecho |
 | MVP 4. Crear (Create) | Hecho |
-| MVP 5. Editar (Update) | Hecho (pendiente commit) |
-| MVP 6. Eliminar (Delete) | Siguiente |
-| MVP 7. Revisión | Pendiente |
+| MVP 5. Editar (Update) | Hecho |
+| MVP 6. Eliminar (Delete) | Hecho (pendiente commit) |
+| MVP 7. Revisión | Siguiente |
 | Mejoras 1 a 8 | Pendientes |
 
 ## Qué se construye
@@ -128,20 +128,32 @@ crud-usuarios-docker/
     │   ├── index.php        # Listado de usuarios (MVP 3)
     │   ├── create.php       # Alta de usuarios (MVP 4)
     │   ├── edit.php         # Edición de usuarios (MVP 5)
+    │   ├── delete.php       # Borrado, solo POST y solo desde el propio sitio (MVP 6)
     │   └── status.php       # Diagnóstico del stack (solo desarrollo)
     ├── includes/            # Código compartido, no accesible por URL
     │   ├── connection.php               # Crea $pdo (PDO)
     │   ├── helpers.php                  # environment(), escape(), log_exception()
     │   ├── user-validation.php          # Campos, limpieza y validación (compartido)
+    │   ├── origin.php                   # Comprueba Origin/Referer contra APP_ORIGIN
     │   ├── DatabaseConnectionException.php
     │   ├── layout/                      # header.php, footer.php
-    │   └── partials/                    # users-list.php, user-form.php, user-not-found.php
+    │   └── partials/                    # users-list.php, user-form.php, user-not-found.php, action-error.php
     └── scripts/             # Solo consola
         ├── db-check.php
         └── info.php
 ```
 
 Estructura objetivo al terminar el CRUD base: ver el Anexo E de [`plan.md`](plan.md).
+
+## Origen de la aplicación (`APP_ORIGIN`)
+
+`delete.php` solo acepta peticiones que vienen del propio sitio: compara la cabecera `Origin` (o, si falta, `Referer`) con `APP_ORIGIN` y responde **403** si no coincide, si falta o si es `null`. Es una capa contra peticiones enviadas desde otras páginas; no sustituye al token CSRF del módulo M6.
+
+- `APP_ORIGIN` es el origen público de la aplicación: **esquema + host + puerto**, sin ruta (`http://localhost:8080`, `https://sitio.com`).
+- Es opcional: por defecto se deriva de `APP_PORT` (`http://localhost:${APP_PORT}`). Fíjalo en `.env` si usas otro host o HTTPS.
+- `localhost` y `127.0.0.1` son orígenes **distintos**: abre la aplicación con el mismo que `APP_ORIGIN`.
+- Si falta o no es un origen válido, la página responde 500 (error de configuración), no 403.
+- Tras cambiarlo, recrea el contenedor: `docker compose up -d`.
 
 ## Manejo de errores
 
@@ -174,6 +186,8 @@ El visitante siempre ve un mensaje genérico; el detalle va al log del contenedo
 - Si cambias las credenciales en `.env` después del primer arranque, MySQL conserva las anteriores: `docker compose down -v` (**borra los datos**).
 - Si `8080` u `8081` están ocupados, cambia `APP_PORT` o `ADMINER_PORT` en `.env`.
 - Si cambias una variable de `.env`, recrea los contenedores con `docker compose up -d`.
+
+**El botón Eliminar responde "Origen no permitido" (403).** Estás abriendo la aplicación con un origen distinto de `APP_ORIGIN` (por ejemplo `http://127.0.0.1:8080` en lugar de `http://localhost:8080`, o un puerto distinto). Abre la dirección que coincide, o ajusta `APP_ORIGIN` en `.env` y ejecuta `docker compose up -d`.
 
 **Tildes como `Ã³` al cargar datos.** El cliente `mysql` del contenedor se conecta como `latin1`. El seed lleva `SET NAMES utf8mb4;` al inicio; tras corregirlo hay que recrear la BD.
 

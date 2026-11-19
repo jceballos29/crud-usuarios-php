@@ -42,7 +42,13 @@ try {
 $messages = [
     "created" => "El usuario ha sido registrado exitosamente.",
     "updated" => "El usuario ha sido actualizado exitosamente.",
-    "deleted" => "El usuario ha sido eliminado exitosamente."
+    "deleted" => "El usuario ha sido eliminado exitosamente.",
+    "missing" => "El usuario ya no existía, no se eliminó nada."
+];
+
+// Tipo de aviso (clase theme-*). Solo se listan las excepciones: lo demás es un éxito.
+$messageTypes = [
+    "missing" => "info", // no es un éxito ni un error: el estado deseado ya se cumplía
 ];
 
 // Si hubo un error, no se muestra ningún mensaje de éxito.
@@ -53,7 +59,7 @@ require __DIR__ . '/../includes/layout/header.php';
 ?>
 
 <?php if ($message !== null): ?>
-    <div class="alert theme-success" role="alert">
+    <div class="alert theme-<?= escape($messageTypes[$message] ?? 'success') ?>" role="alert">
         <p><?= escape($messages[$message]) ?></p>
         <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>

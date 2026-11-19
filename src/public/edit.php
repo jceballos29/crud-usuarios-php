@@ -17,13 +17,11 @@ $submitted = $_SERVER['REQUEST_METHOD'] === 'POST';
 // GET al abrir el formulario, POST al enviarlo. Nunca se mezclan.
 $rawId = $submitted ? ($_POST['id'] ?? null) : ($_GET['id'] ?? null);
 
-// ctype_digit descarta '+14', ' 14', '14 ' y arreglos (filter_var los aceptaría o no): así cada
-// usuario tiene una sola URL. filter_var queda para el rango (1..4294967295, INT UNSIGNED).
-$userId = is_string($rawId) && ctype_digit($rawId)
-    ? filter_var($rawId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 4294967295]])
-    : false;
+// parse_user_id() devuelve el id como int, o null si no es válido (ausente, arreglo, texto,
+// con signo o espacios, o fuera de rango). Ver includes/user-validation.php.
+$userId = parse_user_id($rawId);
 
-$notFound = $userId === false; // id ausente, arreglo, texto o fuera de rango
+$notFound = $userId === null; // id inválido: el inexistente se detecta más abajo con el SELECT
 $loaded = false;               // true cuando el usuario se cargó de la BD
 $user = null;
 

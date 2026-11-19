@@ -3,13 +3,59 @@
 declare(strict_types=1);
 
 /**
- * Lógica compartida de usuarios (create.php y edit.php): definición de campos,
- * limpieza de la entrada y validación. PHP puro: no imprime HTML, no toca la BD
- * y no lee superglobales; todo entra por parámetros.
+ * Lógica compartida de usuarios (create.php, edit.php y delete.php): definición de
+ * campos, limpieza de la entrada y validación, incluido el id. PHP puro: no imprime
+ * HTML, no toca la BD y no lee superglobales; todo entra por parámetros.
  *
  * El correo duplicado NO se valida aquí: depende de la BD y lo resuelve cada
  * página capturando el error 1062 del UNIQUE.
  */
+
+/**
+ * Rango válido de users.id. Coincide con la columna `id INT UNSIGNED AUTO_INCREMENT`
+ * de database/01-schema.sql: el primer id real es 1 y el máximo de INT UNSIGNED es
+ * 4294967295. Si la columna pasa a BIGINT, este es el único sitio de PHP que cambia
+ * (y recuerda que un int de PHP llega a PHP_INT_MAX, 9223372036854775807, y no al
+ * máximo de BIGINT UNSIGNED).
+ */
+const USER_ID_MIN = 1;
+const USER_ID_MAX = 4294967295;
+
+/**
+ * Convierte el id que llega por la petición (GET o POST) en un entero válido.
+ *
+ * Acepta `mixed` porque la entrada no es de fiar: puede ser un string ("14"), null
+ * (no llegó) o un arreglo (?id[]=1). Con `string $raw` y strict_types, null y los
+ * arreglos lanzarían TypeError antes de poder validarlos.
+ *
+ * Solo se admiten dígitos ASCII sin signo, espacios ni ceros a la izquierda, para que
+ * cada usuario tenga una sola URL ("+14", " 14" y "014" no valen). Devuelve null
+ * cuando no es válido: un id inválido es un resultado normal de datos no confiables,
+ * no una situación excepcional, así que no se lanza una excepción.
+ *
+ * Ejemplo:
+ *     parse_user_id('14');      // 14
+ *     parse_user_id('+14');     // null
+ *     parse_user_id(null);      // null
+ *     parse_user_id(['1']);     // null
+ *     parse_user_id('0');       // null (fuera de USER_ID_MIN..USER_ID_MAX)
+ *     parse_user_id(14);        // null (un int no es texto de la petición: no se "re-valida")
+ *
+ * @param mixed $raw Valor crudo de $_GET['id'] / $_POST['id'] (o null si no llegó).
+ * @return int|null El id, o null si no es válido.
+ */
+function parse_user_id(mixed $raw): ?int
+{
+    if (!is_string($raw) || !ctype_digit($raw)) {
+        return null;
+    }
+
+    $id = filter_var($raw, FILTER_VALIDATE_INT, [
+        'options' => ['min_range' => USER_ID_MIN, 'max_range' => USER_ID_MAX],
+    ]);
+
+    return $id === false ? null : $id;
+}
 
 /**
  * Definición de los campos del formulario de usuario.
