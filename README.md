@@ -1,445 +1,397 @@
-# CRUD de usuarios en PHP + MySQL (con Docker)
+# Gestión de usuarios
 
-Proyecto de **aprendizaje**: construir desde cero, paso a paso, un CRUD de usuarios
-en PHP puro (sin frameworks) sobre un stack Docker (Nginx + PHP-FPM + MySQL + Adminer)
-y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
+Aplicación web para administrar un directorio de personas: alta, búsqueda, edición, eliminación reversible y acceso protegido para quienes la administran. Está hecha en **PHP 8.4 puro** (sin frameworks) sobre **MySQL 8.4**, se ejecuta completa con **Docker Compose** y no depende de ningún servicio externo: ni CDN, ni fuentes, ni scripts de terceros.
 
-> El objetivo **no** es tener el código terminado, sino **entender cada pieza**.
-> El código lo escribe el estudiante; el avance, las explicaciones y los experimentos
-> están en [`plan.md`](plan.md).
+![Listado de usuarios](docs/screenshots/listado.png)
 
-## Estado actual
+- [Características](#características)
+- [Capturas](#capturas)
+- [Inicio rápido](#inicio-rápido)
+- [Configuración](#configuración)
+- [Uso](#uso)
+- [Arquitectura](#arquitectura)
+- [Base de datos](#base-de-datos)
+- [Seguridad](#seguridad)
+- [Interfaz y accesibilidad](#interfaz-y-accesibilidad)
+- [Pruebas](#pruebas)
+- [Operación](#operación)
+- [Puesta en producción](#puesta-en-producción)
+- [Solución de problemas](#solución-de-problemas)
+- [Desarrollo](#desarrollo)
+- [Limitaciones conocidas y hoja de ruta](#limitaciones-conocidas-y-hoja-de-ruta)
+- [Documentación adicional](#documentación-adicional)
 
-| Fase | Estado |
-|------|--------|
-| 0. Entorno Docker | Hecha |
-| MVP 1. Base de datos (`users`) | Hecho |
-| MVP 2. Conexión PDO y manejo de errores | Hecho |
-| MVP 3. Listar (Read) | Hecho |
-| MVP 4. Crear (Create) | Hecho |
-| MVP 5. Editar (Update) | Hecho |
-| MVP 6. Eliminar (Delete) | Hecho |
-| MVP 7. Revisión | Hecho (etiqueta `v1-crud-base`) |
-| Mejora 1. Búsqueda y filtros | Hecha (rama `mejora-1-busqueda`) |
-| Mejora 2. Paginación | Hecha (rama `mejora-2-paginacion`) |
-| Mejora 3. Más campos (documento, nacimiento, rol) | Hecha (rama `mejora-3-mas-campos`) |
-| Mejora 4. Borrado lógico | Hecha (rama `mejora-4-borrado-logico`) |
-| Mejora 5. Inicio de sesión | Hecha (rama `mejora-5-login`) |
-| Mejora 6. Tokens CSRF | Hecha (rama `mejora-6-csrf`) |
-| Mejora 7. Usuario de BD con mínimo privilegio | Hecha (rama `mejora-7-minimo-privilegio`) |
-| Mejora 8. Separación en capas (hacia MVC) | Hecha (rama `mejora-8-capas`) |
+## Características
 
-## Qué se construye
+**Gestión de usuarios**
+- Alta y edición con validación en servidor: nombre, apellido, correo (único), teléfono, documento de identidad (único, opcional), fecha de nacimiento y rol.
+- **Búsqueda** por nombre, apellido, nombre completo, correo, teléfono o documento; ignora mayúsculas y tildes y trata `%`, `_` y `\` como texto.
+- **Paginación** de 10 en 10 que conserva la búsqueda y la vista al editar, cancelar, eliminar o restaurar.
+- **Borrado lógico**: eliminar no destruye el dato; hay una vista de eliminados con **Restaurar**.
+- **Control de ediciones simultáneas**: si otra persona modificó al usuario mientras lo editabas, se avisa (409) en lugar de pisar sus cambios.
 
-| Operación | SQL | Página |
-|-----------|-----|--------|
-| Create | `INSERT` | `create.php` |
-| Read | `SELECT` (con búsqueda y paginación) | `index.php` |
-| Update | `UPDATE` | `edit.php` |
-| Delete | `UPDATE ... SET active = 0` (borrado lógico) | `delete.php` |
-| Restore | `UPDATE ... SET active = 1` | `restore.php` |
-| Acceso | `SELECT` del usuario con rol admin y contraseña; sesión y token CSRF | `login.php`, `logout.php` |
+**Acceso**
+- Inicio de sesión para administradores. Un usuario con rol *Administrador* y una contraseña puede entrar; se registra desde la propia pantalla de usuarios.
+- Sesión con cookie `HttpOnly` y `SameSite=Lax`, que caduca a los 30 minutos de inactividad.
+- Protección CSRF en todos los formularios, comprobación del origen de cada petición y contraseñas guardadas con bcrypt.
 
-Todas exigen haber iniciado sesión salvo `login.php`. El SQL vive solo en los repositorios (ver «Arquitectura»).
+**Interfaz**
+- Diseño propio, sin librerías de CSS: modo claro y oscuro automáticos, adaptable a móvil y accesible con teclado.
+- Confirmaciones con un diálogo propio, avisos que se cierran y protección contra el doble envío.
 
-Tabla `users` (`database/01-schema.sql`):
+**Ingeniería**
+- Código en capas (controladores, validador, repositorios, entidad, vistas) con autoload de Composer y una sola clase con acceso al SQL.
+- Dos usuarios de base de datos con **mínimo privilegio**: uno para la aplicación y otro, solo manual, para las migraciones.
+- Más de 1.500 comprobaciones automáticas: unitarias, de integración, de arquitectura, de permisos, de migraciones y de punta a punta.
+
+## Capturas
+
+| Inicio de sesión | Registrar un administrador |
+|:---:|:---:|
+| ![Inicio de sesión](docs/screenshots/login.png) | ![Formulario de alta](docs/screenshots/formulario.png) |
+
+| Confirmación al eliminar | Modo oscuro | Móvil |
+|:---:|:---:|:---:|
+| ![Diálogo de confirmación](docs/screenshots/confirmar.png) | ![Listado en modo oscuro](docs/screenshots/listado-oscuro.png) | ![Listado en móvil](docs/screenshots/movil.png) |
+
+## Inicio rápido
+
+**Requisitos:** Docker y Docker Compose v2. (Para ejecutar las pruebas de punta a punta también hacen falta `bash` y `curl`.)
+
+```bash
+git clone <url-del-repositorio> gestion-usuarios
+cd gestion-usuarios
+cp .env.example .env          # trae claves de DESARROLLO que ya funcionan
+docker compose up -d --build
+```
+
+La primera vez, MySQL crea la base, las tablas, los datos de ejemplo y los dos usuarios de base de datos; el contenedor de PHP genera `vendor/` (el autoload de Composer). Cuando `docker compose ps` muestre los cuatro servicios en marcha y `db` en `healthy`:
+
+| Servicio | Dirección | Notas |
+|----------|-----------|-------|
+| Aplicación | http://localhost:8080 | Solo escucha en `127.0.0.1` |
+| Adminer (cliente de BD) | http://localhost:8081 | Sistema MySQL, servidor `db`; solo en `127.0.0.1` |
+| Diagnóstico del stack | http://localhost:8080/status.php | Solo con `APP_ENV=local` |
+
+### Cuentas de desarrollo
+
+Son **claves conocidas, solo para tu máquina**. Cámbialas o bórralas antes de exponer la aplicación (ver [Puesta en producción](#puesta-en-producción)).
+
+| Cuenta | Para qué | Usuario | Clave |
+|--------|----------|---------|-------|
+| Administrador de la aplicación | Entrar en `/login.php` | `admin@example.com` | `Admin-Demo-2026` |
+| Base de datos: aplicación | La usa PHP en cada petición (solo lee y escribe filas) | `crud_app` | `crud_app_dev_2026` |
+| Base de datos: migraciones | Cambiar el esquema y tareas manuales | `crud_migrator` | `crud_migrator_dev_2026` |
+| `root` de MySQL | Administrar el servidor | `root` | `cambia-esta-clave-root` |
+
+> El administrador de desarrollo es un usuario más del listado. En una BD creada antes, el seed no se vuelve a ejecutar: crea el tuyo con `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com`.
+
+## Configuración
+
+Toda la configuración llega por **variables de entorno** definidas en `.env` (que no se sube a git). `.env.example` es la plantilla.
+
+| Variable | Por defecto | Descripción |
+|----------|-------------|-------------|
+| `APP_ENV` | `local` | `local`: errores en pantalla y `status.php`. Cualquier otro valor (p. ej. `production`): modo seguro, errores solo al log y `status.php` responde 404. |
+| `APP_PORT` | `8080` | Puerto en el que se publica la aplicación (en `127.0.0.1`). |
+| `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Origen público (esquema + host + puerto, sin ruta). Los POST solo se aceptan si vienen de este origen. Con `https://` la cookie de sesión pasa a `Secure`. `localhost` y `127.0.0.1` son orígenes distintos. |
+| `DB_HOST`, `DB_PORT` | `db`, `3306` | Dónde está MySQL (el servicio `db` de Compose). |
+| `DB_DATABASE` | `crud_usuarios` | Nombre de la base. |
+| `DB_USERNAME`, `DB_PASSWORD` | `crud_app` y su clave | Usuario de **la aplicación**. Solo `SELECT`, `INSERT` y `UPDATE` sobre `users`. |
+| `DB_MIGRATION_USERNAME`, `DB_MIGRATION_PASSWORD` | `crud_migrator` y su clave | Usuario de **migraciones**: todos los permisos sobre la base. El contenedor `php` no lo conoce (ver `bin/as-migrator`). Obligatoria: sin ella `docker compose` falla con un aviso. |
+| `DB_ROOT_PASSWORD` | `cambia-esta-clave-root` | Clave de `root` de MySQL. Solo se usa dentro del contenedor `db`. |
+| `ADMINER_PORT` | `8081` | Puerto de Adminer (en `127.0.0.1`). |
+| `HOST_UID`, `HOST_GID` | `1000` | UID y GID de tu usuario (`id -u`, `id -g`), para que los archivos creados desde el contenedor sean tuyos. |
+| `XDEBUG_MODE` | `off` | `debug` para depurar con VS Code (puerto 9003). |
+
+Tras cambiar una variable, recrea los contenedores: `docker compose up -d`. MySQL conserva los usuarios ya creados: si cambias `DB_PASSWORD` o `DB_MIGRATION_PASSWORD` en una instalación existente, ejecuta `docker compose exec db bash /docker-entrypoint-initdb.d/03-users.sh`, que actualiza las claves (la de `root` solo se cambia con `docker compose down -v`, que borra los datos).
+
+## Uso
+
+### Roles y acceso
+
+| Rol | Puede iniciar sesión | Significado |
+|-----|:---:|-------------|
+| Administrador (`admin`) | Sí, si tiene contraseña | Gestiona todos los usuarios. |
+| Editor (`editor`) | No | Etiqueta del directorio. |
+| Usuario (`user`) | No | Etiqueta del directorio. |
+
+Para dar acceso a alguien: **Registrar usuario** (o **Editar**), rol *Administrador* y una contraseña de 10 a 72 bytes. Cambiar el correo cambia con qué correo entra; quitarle el rol **borra su contraseña**; eliminarlo le quita el acceso y restaurarlo se lo devuelve. Dejar la contraseña vacía al editar conserva la actual. **Nadie puede eliminarse ni quitarse el rol a sí mismo.**
+
+### Rutas
+
+Todas exigen sesión salvo `login.php`. Los métodos que cambian datos son siempre `POST`.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/` | Listado. Parámetros: `q` (búsqueda), `page`, `view=inactive` (eliminados). |
+| GET, POST | `/create.php` | Formulario de alta y su proceso. |
+| GET, POST | `/edit.php?id=N` | Formulario de edición y su proceso. |
+| POST | `/delete.php` | Elimina (borrado lógico). |
+| POST | `/restore.php` | Restaura a un eliminado. |
+| GET, POST | `/login.php` | Formulario y proceso de inicio de sesión. |
+| POST | `/logout.php` | Cierra la sesión. |
+| GET | `/status.php` | Diagnóstico del stack (solo `APP_ENV=local`). |
+
+### Códigos de respuesta
+
+Si una operación no se completó, nunca responde 200.
+
+| Código | Cuándo |
+|--------|--------|
+| 302 | Tras una acción correcta; sin sesión, hacia `login.php`. |
+| 400 | `delete.php` o `restore.php` con un id mal formado. |
+| 401 | Credenciales incorrectas (siempre el mismo mensaje). |
+| 403 | Origen no permitido o token CSRF inválido. |
+| 404 | Usuario inexistente, eliminado o id inválido en `edit.php`. |
+| 405 | Método incorrecto (`delete.php`, `restore.php` y `logout.php` solo admiten POST). |
+| 409 | Correo o documento duplicado, o edición simultánea. |
+| 422 | Datos del formulario inválidos. |
+| 500 / 503 | Fallo de consulta o configuración / base de datos no disponible. Sin detalles técnicos en pantalla; el detalle va al log. |
+
+## Arquitectura
+
+```
+Petición ─► nginx ─► PHP-FPM ─► public/*.php ─► Controlador ─► Validador ─┐
+                                                    │                      ▼
+                                                    ├──────────────► Repositorio ─► MySQL
+                                                    ▼
+                                                  Vista (views/) ─► HTML
+```
+
+| Capa | Dónde | Responsabilidad | No hace |
+|------|-------|-----------------|---------|
+| Página | `src/public/*.php` | Arranca y llama a un método de un controlador (7 líneas). | Nada más. |
+| Controlador | `src/app/Controller/` | Comprueba quién pide (origen, sesión, CSRF), lee la petición, usa el validador y el repositorio, elige vista o redirección. | No tiene SQL ni HTML. |
+| Validación | `src/app/Validation/` | Campos y reglas de un usuario, las mismas al crear y al editar. | No toca la BD ni la petición. |
+| Repositorio | `src/app/Repository/` | **El único lugar con SQL**: buscar, contar, crear, actualizar, eliminar, restaurar. | No sabe de HTTP ni de HTML. |
+| Entidad | `src/app/Domain/User.php` | Los datos de un usuario, tipados e inmutables. | No sabe de SQL. |
+| Vista | `src/views/` | HTML con la mínima lógica; toda salida escapada. | No consulta la BD ni lee la petición. |
+
+Decisiones relevantes:
+- **Autoload PSR-4** (`App\` → `src/app/`) con Composer. No hay dependencias de terceros: Composer solo aporta el autoload. `vendor/` no se versiona; el contenedor lo genera al arrancar si falta.
+- **Inyección de dependencias**: `UserRepository` recibe el `PDO` en el constructor. `Container` arma las piezas y abre la conexión **solo cuando hace falta**, de modo que una petición inválida (un id mal formado, un token incorrecto) se rechaza sin tocar la BD.
+- **Orden de comprobaciones** en cada POST: método (405) → origen (403) → sesión (302) → token CSRF (403) → datos (400/404/422) → BD.
+- **Errores**: `Failure::describe()` traduce una excepción (`DatabaseConnectionException` → 503, `PDOException` → 500, valor repetido → 409) en un código y un aviso genérico, y registra el detalle.
+- `src/tests/architecture.php` vigila estas reglas: solo los repositorios ejecutan SQL, las vistas no tocan la BD y toda salida lleva `escape()`.
+
+### Estructura del proyecto
+
+```
+.
+├── docker-compose.yml        # nginx, php-fpm, mysql y adminer
+├── .env.example              # plantilla de configuración
+├── docker/                   # Dockerfile de PHP, php.ini, nginx (cabeceras y CSP), entrypoint
+├── database/
+│   ├── 01-schema.sql         # esquema de una instalación nueva
+│   ├── 02-seed.sql           # datos de ejemplo y administrador de desarrollo
+│   ├── 03-users.sh           # crea los usuarios de BD con mínimo privilegio
+│   └── migrations/           # cambios de esquema para una BD existente (001 a 004)
+├── bin/as-migrator           # ejecuta un comando de PHP como usuario de migraciones
+├── tests/                    # pruebas de punta a punta, permisos y migraciones
+└── src/                      # montado en /var/www/html
+    ├── public/               # raíz web: páginas, css/, js/, img/
+    ├── app/                  # Controller, Repository, Domain, Validation, Search, Http, Auth, Database, View, Security…
+    ├── views/                # plantillas HTML
+    ├── scripts/              # solo consola: create-admin.php, seed-demo.php, db-check.php
+    ├── tests/                # unit.php, integration.php, architecture.php
+    ├── bootstrap.php         # carga el autoload
+    └── composer.json
+```
+
+## Base de datos
+
+**`users`**
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
-| `id` | `INT UNSIGNED` | PK, autoincremental |
-| `name`, `last_name` | `VARCHAR(100)` | obligatorios |
-| `email` | `VARCHAR(254)` | obligatorio, **único** |
-| `phone` | `VARCHAR(20)` | opcional (`NULL`) |
-| `document` | `VARCHAR(20)` | opcional, **único** (varios `NULL` conviven) |
-| `birth_date` | `DATE` | opcional |
-| `role` | `ENUM('user','editor','admin')` | obligatorio, por defecto `user`; solo `admin` puede iniciar sesión |
-| `password_hash` | `VARCHAR(255)` | hash bcrypt de la contraseña; `NULL` = no puede iniciar sesión |
-| `active` | `TINYINT(1)` | 1 = visible, 0 = eliminado (borrado lógico); índice `(active, id)` |
-| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP`, en UTC |
+| `id` | `INT UNSIGNED` | PK, autoincremental. |
+| `name`, `last_name` | `VARCHAR(100)` | Obligatorios. |
+| `email` | `VARCHAR(254)` | Obligatorio, **único**; se guarda en minúsculas. |
+| `phone` | `VARCHAR(20)` | Opcional. |
+| `document` | `VARCHAR(20)` | Opcional, **único** (varios `NULL` conviven); se guarda en mayúsculas. |
+| `birth_date` | `DATE` | Opcional; no futura ni anterior a 1900. |
+| `role` | `ENUM('user','editor','admin')` | Por defecto `user`. |
+| `password_hash` | `VARCHAR(255)` | Hash bcrypt; `NULL` = no puede iniciar sesión. |
+| `active` | `TINYINT(1)` | 1 visible, 0 eliminado. Índice `(active, id)`. |
+| `created_at` | `DATETIME` | En UTC. |
 
-**Quién puede iniciar sesión:** un usuario con rol `admin`, activo y con `password_hash`. No hay tabla aparte (existió hasta la migración 004). Los cambios de esquema posteriores a la primera instalación están en `database/migrations/`.
+Quien puede iniciar sesión es un usuario con `role = 'admin'`, `active = 1` y `password_hash` no nulo.
 
-## Convenciones
+**Fechas.** Se guardan en UTC (MySQL arranca con `--default-time-zone=+00:00` y cada conexión ejecuta `SET time_zone`) y se muestran en la zona `date.timezone` de `docker/php/php.ini` (hoy `America/Bogota`). Adminer y el cliente `mysql` muestran la hora en UTC.
 
-- Código, tablas y nombres de archivo en **inglés**; textos para el usuario en **español**.
-- `declare(strict_types=1);` en todos los archivos PHP.
-- Toda salida a HTML pasa por `escape()` (`src/app/support.php`); lo comprueba `src/tests/architecture.php`.
-- Credenciales **solo** por variables de entorno (`.env`), nunca en el código.
-- Lo que no debe ser accesible por URL vive fuera de `src/public/`.
+### Usuarios de la base de datos
 
-## Material de referencia
+| Usuario | Permisos | Se usa para |
+|---------|----------|-------------|
+| `crud_app` | `SELECT`, `INSERT`, `UPDATE` sobre `users` | La aplicación web. No puede `DELETE`, `DROP`, `ALTER`, `CREATE`, ni leer otras bases. |
+| `crud_migrator` | Todos sobre `crud_usuarios`, sin `GRANT OPTION` | Migraciones y tareas manuales, vía `bin/as-migrator`. |
 
-Está en la carpeta superior (`../`), fuera de este proyecto a propósito:
+`database/03-users.sh` los crea con las claves de `.env` (un `.sql` no puede leer variables de entorno) y es repetible. Como la aplicación registra administradores, `crud_app` puede escribir `role` y `password_hash`.
 
-| Archivo | Para qué sirve |
-|---------|----------------|
-| `Guía técnica del CRUD de usuarios en PHP y MySQL (XAMPP).pdf` | Teoría del CRUD y lista de mejoras (§11) |
-| `php-docker-stack.zip` | Plantilla del entorno Docker usada como base |
-| `crud_usuarios.zip` | Solución original en XAMPP. **No abrir hasta el MVP 7**, para comparar con la versión propia |
+### Migraciones
 
-## Stack
-
-| Servicio | Imagen | Rol | Acceso |
-|----------|--------|-----|--------|
-| `nginx` | nginx 1.30 alpine | Recibe HTTP y sirve `src/public` | http://localhost:8080 |
-| `php` | php:8.4.27-fpm, versión de parche fijada (Dockerfile propio) | Ejecuta PHP (FastCGI, puerto interno 9000) | solo desde nginx |
-| `db` | mysql:8.4 | Base de datos | solo red interna (host `db`, 3306) |
-| `adminer` | adminer 6.3 | Cliente web de BD (equivale a phpMyAdmin) | http://localhost:8081 |
-
-Nginx y Adminer solo se publican en `127.0.0.1`: no son accesibles desde la red local.
-
-### Equivalencias XAMPP a Docker
-
-| En la guía (XAMPP) | En este proyecto (Docker) |
-|--------------------|---------------------------|
-| Panel de control: Start Apache y MySQL | `docker compose up -d` |
-| `C:\xampp\htdocs\crud_usuarios` | `src/public/` (raíz web) |
-| `http://localhost/crud_usuarios/` | `http://localhost:8080/` |
-| MySQL en `localhost`, usuario `root` sin clave | Host `db`, usuario propio con clave (`.env`) |
-| phpMyAdmin | Adminer |
-| Importar `database.sql` a mano | Se carga solo la primera vez desde `database/` |
-| Credenciales escritas en `conexion.php` | Variables de entorno (`getenv`) |
-
-## Puesta en marcha
-
-Requisitos: Docker, Docker Compose y Git.
+Una instalación nueva usa `01-schema.sql`; una BD existente se actualiza con los archivos de `database/migrations/`, **en orden y una sola vez** (una segunda ejecución falla sin cambiar nada). `01-schema.sql` debe llevar siempre lo mismo que las migraciones; los scripts `tests/migration-00N.sh` lo verifican.
 
 ```bash
-cp .env.example .env     # trae claves de DESARROLLO que ya funcionan (ver «Usuarios y claves» abajo); cámbialas fuera de tu máquina
-docker compose up -d --build
-docker compose ps        # los 4 servicios en running; db en healthy
+# Haz una copia antes (ver «Copias de seguridad»)
+docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/migrations/004-user-passwords.sql
 ```
 
-- **Entrar:** http://localhost:8080/login.php. Una instalación nueva trae un administrador de **desarrollo** (`database/02-seed.sql`): correo `admin@example.com`, contraseña `Admin-Demo-2026` (todas las cuentas de desarrollo están en «Usuarios y claves»). Es un usuario más de la lista, con rol Administrador y una clave conocida: bórralo fuera de tu máquina (`DELETE FROM users WHERE email = 'admin@example.com'`).
-- **Registrar más administradores:** entra y pulsa **Registrar usuario**: con el rol *Administrador* aparecen los campos de contraseña (y repetirla). Esa persona podrá iniciar sesión con su correo y esa contraseña. También se puede **ascender** a un usuario existente (Editar, rol Administrador y una contraseña).
-- **El primer administrador** (o recuperar el acceso si nadie puede entrar): `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com` (pide la contraseña, de 10 a 72 bytes, sin mostrarla); si el correo ya era un usuario, lo promueve. En una BD que ya existía, aplica antes las migraciones hasta la `004-user-passwords.sql`.
-- Diagnóstico del stack: http://localhost:8080/status.php (solo con `APP_ENV=local`; en cualquier otro entorno responde 404 para no revelar versiones)
-- Adminer: http://localhost:8081 (sistema MySQL, servidor `db`; usuario y clave: ver «Usuarios y claves»)
+| Migración | Cambio |
+|-----------|--------|
+| `001-more-fields.sql` | Documento, fecha de nacimiento y rol. |
+| `002-active.sql` | Borrado lógico (`active`) e índice `(active, id)`. |
+| `003-admins.sql` | Tabla `admins` (sustituida por la 004). |
+| `004-user-passwords.sql` | `users.password_hash`; los administradores pasan a `users` y se borra `admins`. **Sin vuelta atrás automática.** |
 
-> El script SQL de `database/` solo se ejecuta cuando el volumen de MySQL está vacío.
-> Si cambias el esquema, las claves de `.env` o `02-seed.sql`, recrea la BD:
-> `docker compose down -v && docker compose up -d` (**borra los datos**).
+## Seguridad
 
-## Comandos útiles
+| Control | Implementación |
+|---------|----------------|
+| Inyección SQL | Consultas preparadas nativas (`EMULATE_PREPARES=false`); lo que escribe la persona nunca se concatena en el SQL. |
+| XSS | Toda salida HTML pasa por `escape()` (comprobado por `architecture.php`); CSP sin scripts ni estilos en línea. |
+| CSRF | Token por sesión (`hash_equals`) en los seis formularios POST, renovado al iniciar sesión; más comprobación de `Origin`/`Referer` y cookie `SameSite=Lax`. |
+| Autenticación | bcrypt; mensaje, código y **tiempo** idénticos para correo inexistente, clave mala, rol sin acceso o usuario eliminado (se verifica contra un hash ficticio). Contraseñas de 10 a 72 bytes y sin NUL (bcrypt truncaba). |
+| Sesión | Cookie `crud_session` (`HttpOnly`, `SameSite=Lax`, `Secure` con HTTPS), `session.use_strict_mode`, id nuevo al entrar (fijación de sesión), caducidad a los 30 min de inactividad, `Cache-Control: no-store` en páginas protegidas. |
+| Cabeceras | `Content-Security-Policy` (`default-src 'self'`), `X-Frame-Options: DENY`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`; nginx oculta su versión. |
+| Mínimo privilegio | Usuario de BD de la aplicación sin `DELETE` ni DDL; el de migraciones no se entrega a la aplicación. |
+| Errores | Mensajes genéricos al visitante; el detalle solo en el log. Con `APP_ENV` distinto de `local`, PHP no muestra errores. |
+| Red | nginx y Adminer solo escuchan en `127.0.0.1`; MySQL no se publica. |
 
-| Acción | Comando |
-|--------|---------|
-| Ver logs (todos / PHP) | `docker compose logs -f` / `docker compose logs -f php` |
-| Shell en PHP | `docker compose exec php sh` |
-| Comprobar conexión a MySQL | `docker compose exec php php scripts/db-check.php` |
-| Comando en PHP **como usuario de migraciones** (crear administradores, datos de demostración, pruebas de integración) | `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com` |
-| Todas las pruebas | `tests/run-all.sh` (`--with-db-stop` para incluir los 503) |
-| Pruebas unitarias (sin BD) | `docker compose exec php php tests/unit.php` |
-| Pruebas de arquitectura | `docker compose exec php php tests/architecture.php` |
-| Pruebas de punta a punta | `tests/smoke.sh` (añade `--with-db-stop` para parar y levantar la BD) |
-| Pruebas de permisos de la BD | `tests/privileges.sh` |
-| Composer | `docker compose exec php composer <comando>` |
-| Ejecutar un `.sql` como root | `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < archivo.sql` |
-| Apagar (conserva datos) | `docker compose down` |
-| Apagar y borrar la BD | `docker compose down -v` |
+Más detalle sobre el diseño de cada control (y lo que se midió) en [`plan.md`](plan.md). Para **reportar una vulnerabilidad**, avisa en privado a quien mantenga el repositorio antes de abrir una incidencia pública.
+
+## Interfaz y accesibilidad
+
+- Hoja de estilos propia (`src/public/css/app.css`) con variables para colores, radios y tiempos; cambiar el acento es cambiar `--primary`.
+- Tipografía del sistema, iconos propios en un SVG (`img/icons.svg`) y JavaScript sin dependencias (`js/app.js`).
+- Modo claro y oscuro según el sistema, `prefers-reduced-motion` respetado, contraste de texto de 4,5:1 o más y de 3:1 o más en los bordes de los campos.
+- Navegable con teclado: foco visible, enlace «Saltar al contenido», etiquetas y errores asociados a cada campo.
+- En móvil, el listado pasa de tabla a tarjetas.
+- Verificado con Playwright en Firefox (escritorio, tableta y móvil, claro y oscuro). **No se ha probado en Chrome ni en Safari.**
 
 ## Pruebas
 
-Hay seis niveles y no necesitan instalar nada más que lo que ya usa el proyecto. **Para ejecutarlos todos** (por ejemplo antes de etiquetar una versión): `tests/run-all.sh` (o `tests/run-all.sh --with-db-stop`, que además para y levanta la BD para comprobar los 503).
+No necesitan instalar nada más. Con la aplicación levantada:
 
-- **Unitarias** (`src/tests/unit.php`): la lógica pura (validador, entidad `User`, búsqueda, paginación, autenticación, origen, sesión, fechas, escape). No usan BD ni servidor. `docker compose exec php php tests/unit.php`.
-- **De integración** (`src/tests/integration.php`): los repositorios (`UserRepository`, `AdminRepository`: búsqueda, paginación, borrado lógico, duplicados, inicio de sesión) contra MySQL, sobre una tabla temporal que no toca tus datos. `bin/as-migrator php tests/integration.php` (necesita el usuario de migraciones: crea tablas temporales).
-- **De arquitectura** (`src/tests/architecture.php`): lee los archivos y comprueba que cada pieza cumple su sola responsabilidad: solo los repositorios ejecutan SQL, las páginas de `public/` y las vistas no tocan la BD, las vistas escapan toda salida y las clases se cargan por su nombre. `docker compose exec php php tests/architecture.php`.
-- **De permisos** (`tests/privileges.sh`): habla con MySQL como el usuario de la aplicación y el de migraciones y comprueba qué puede y qué NO puede hacer cada uno (`DROP`, `ALTER`, `DELETE`, `GRANT`, leer `mysql.user`...), y que `database/03-users.sh` es repetible y corrige a un usuario con demasiados permisos.
-- **De las migraciones** (`tests/migration-001.sh` a `-004.sh`): aplican `database/migrations/` a una BD temporal con el esquema anterior y comprueban que acaba igual que una instalación nueva. Usan root y borran sus bases temporales.
-- **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, inicio y cierre de sesión (cookie, fijación, caducidad), token CSRF y origen en todos los POST, búsqueda, paginación, borrado lógico, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Crea un administrador de prueba (`smoke-admin@example.com`) con el usuario de migraciones y lo borra al terminar. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
-
-Todos terminan con código 0 si todo pasa y con 1 si algo falla, así que sirven también para automatizarlos. Si cambias el puerto o el origen, usa `BASE_URL` y `ORIGIN`.
-
-## Estructura
-
-```
-crud-usuarios-docker/
-├── plan.md                  # Guía paso a paso con checks
-├── README.md
-├── docker-compose.yml       # Servicios: php, nginx, db, adminer
-├── .env / .env.example      # Variables (.env no se sube a git)
-├── docker/                  # Dockerfile de PHP, php.ini (seguro), php.local.ini (solo desarrollo), xdebug.ini, nginx (cabeceras y CSP)
-├── bin/
-│   └── as-migrator          # Ejecuta un comando en PHP conectado a la BD como usuario de migraciones (M7)
-├── tests/
-│   ├── run-all.sh           # Ejecuta todas las pruebas y resume el resultado
-│   ├── smoke.sh             # Pruebas de punta a punta con curl
-│   ├── migration-001.sh     # Prueba de la migración 001 con bases temporales
-│   ├── migration-002.sh     # Prueba de la migración 002
-│   ├── migration-003.sh     # Prueba de la migración 003
-│   ├── migration-004.sh     # Prueba de la migración 004 (mueve a los administradores a users)
-│   ├── privileges.sh        # Permisos de la BD: qué puede y qué no puede cada usuario (M7)
-│   └── csrf-demo/           # Página «atacante» y guía para ver CSRF en el navegador (M6)
-├── database/
-│   ├── 01-schema.sql        # Tabla users (instalación nueva)
-│   ├── 02-seed.sql          # 3 usuarios de prueba y el administrador de desarrollo (otro usuario, con rol Administrador y contraseña)
-│   ├── 03-users.sh          # Crea los usuarios de la BD con mínimo privilegio (aplicación y migraciones), con las claves de .env
-│   └── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql, 002-active.sql, 003-admins.sql, 004-user-passwords.sql)
-└── src/                     # Montado en /var/www/html
-    ├── public/              # Raíz web: lo único que ve el navegador. Cada página: 7 líneas (arranque + un método de un controlador)
-    │   ├── index.php        # Listado de usuarios (MVP 3)
-    │   ├── create.php       # Alta de usuarios (MVP 4)
-    │   ├── edit.php         # Edición de usuarios (MVP 5)
-    │   ├── delete.php       # Eliminar (borrado lógico), solo POST y solo desde el propio sitio (MVP 6, M4)
-    │   ├── login.php        # Formulario y proceso de inicio de sesión (M5)
-    │   ├── logout.php       # Cierra la sesión, solo POST (M5)
-    │   ├── restore.php      # Restaurar a un eliminado, solo POST y solo desde el propio sitio (M4)
-    │   ├── status.php       # Diagnóstico del stack (solo APP_ENV=local)
-    │   ├── css/app.css      # Hoja de estilos propia (tokens, componentes, modo oscuro): sin Bootstrap
-    │   ├── img/icons.svg    # Iconos propios (hoja de símbolos SVG)
-    │   └── js/app.js        # Diálogo de confirmación (<dialog>), avisos que se cierran y un solo envío
-    ├── bootstrap.php        # Arranque común: carga el autoload de Composer (vendor/)
-    ├── composer.json        # Autoload PSR-4 (App\ -> app/) y las funciones de app/. Sin dependencias de terceros
-    ├── app/                 # El código de la aplicación (no accesible por URL), una responsabilidad por clase
-    │   ├── Controller/      # UserController (listar, crear, editar, eliminar, restaurar), AuthController, StatusController
-    │   ├── Repository/      # UserRepository y AdminRepository: ÚNICO lugar con SQL
-    │   ├── Domain/User.php  # La entidad: datos tipados e inmutables, huella de edición, roles
-    │   ├── Validation/      # UserValidator: campos, limpieza y reglas (crear y editar usan las mismas)
-    │   ├── Search/          # UserSearch: término, patrón LIKE y consultas de búsqueda (puro, no ejecuta nada)
-    │   ├── Http/            # Pagination, Response, Failure (de un fallo a un código HTTP y un aviso)
-    │   ├── Auth/AdminAuth.php           # Reglas de las credenciales y comprobación (con AdminRepository)
-    │   ├── Database/Connection.php      # Construye el PDO con las variables de entorno
-    │   ├── Config/Environment.php, Logging/Logger.php, Exceptions/   # Entorno, log y excepciones propias
-    │   ├── View/View.php    # Pinta las vistas de views/
-    │   ├── Container.php    # Construye las piezas con sus dependencias (la conexión se abre al pedirla)
-    │   ├── support.php      # Funciones de vistas: escape(), format_utc_datetime()
-    │   └── Security/        # Funciones de la petición: origin, request-guard, session, csrf (tocan cabeceras y $_SESSION)
-    ├── views/               # HTML con la mínima lógica: layout/, users/, auth/, partials/
-    ├── tests/               # unit.php, integration.php, architecture.php y harness.php (común); fuera de public/
-    └── scripts/             # Solo consola
-        ├── db-check.php
-        ├── create-admin.php  # Da acceso a un administrador desde la consola (crea o promueve a un usuario)
-        ├── seed-demo.php   # Inserta/borra usuarios de demostración (demo-NNN@example.com)
-        └── info.php
+```bash
+tests/run-all.sh                  # todas, con un resumen
+tests/run-all.sh --with-db-stop   # además comprueba los 503 parando y levantando la BD
 ```
 
-Estructura objetivo al terminar el CRUD base: ver el Anexo E de [`plan.md`](plan.md).
+| Nivel | Comando | Qué comprueba |
+|-------|---------|---------------|
+| Unitarias | `docker compose exec php php tests/unit.php` | Validador, entidad, búsqueda, paginación, contraseñas, sesión, origen. Sin BD. |
+| Arquitectura | `docker compose exec php php tests/architecture.php` | Solo los repositorios ejecutan SQL; las vistas no tocan la BD y escapan; el autoload carga cada clase. |
+| Integración | `bin/as-migrator php tests/integration.php` | Los repositorios contra MySQL, con tablas temporales que no tocan tus datos. |
+| Migraciones | `tests/migration-001.sh` … `-004.sh` | Aplicar cada migración deja el mismo esquema que una instalación nueva y conserva los datos. |
+| Permisos | `tests/privileges.sh` | Qué puede y qué **no** puede hacer cada usuario de BD (`DROP`, `ALTER`, `DELETE`, `GRANT`…). |
+| De punta a punta | `tests/smoke.sh [--with-db-stop]` | La aplicación real con `curl`: códigos, redirecciones, cabeceras, sesión, CSRF, búsqueda, paginación, borrado lógico y acceso. |
 
-## Origen de la aplicación (`APP_ORIGIN`)
+Todas terminan con código 0 si pasan y 1 si fallan, así que sirven para integración continua. `smoke.sh` solo crea y borra datos `smoke-*@example.com`; si cambias el puerto o el origen, usa `BASE_URL` y `ORIGIN`.
 
-Los POST de `login.php`, `logout.php`, `create.php`, `edit.php`, `delete.php` y `restore.php` solo se aceptan si vienen del propio sitio: `reject_foreign_origin()` (en `app/Security/request-guard.php`) compara la cabecera `Origin` (o, si falta, `Referer`) con `APP_ORIGIN` y responde **403** si no coincide, si falta o si es `null`, **antes** de mirar lo que se envía (ni siquiera se valida el id ni los campos). Es una capa contra peticiones enviadas desde otras páginas; no sustituye al token CSRF del módulo M6. Los GET no se comprueban.
+## Operación
 
-- `APP_ORIGIN` es el origen público de la aplicación: **esquema + host + puerto**, sin ruta (`http://localhost:8080`, `https://sitio.com`).
-- Es opcional: por defecto se deriva de `APP_PORT` (`http://localhost:${APP_PORT}`). Fíjalo en `.env` si usas otro host o HTTPS.
-- `localhost` y `127.0.0.1` son orígenes **distintos**: abre la aplicación con el mismo que `APP_ORIGIN`.
-- Si falta o no es un origen válido, las tres páginas responden 500 (error de configuración, registrado como `[config]`), no 403.
-- Tras cambiarlo, recrea el contenedor: `docker compose up -d`.
+### Comandos habituales
 
-## Entornos (`APP_ENV`)
+| Acción | Comando |
+|--------|---------|
+| Levantar / apagar (conserva los datos) | `docker compose up -d` / `docker compose down` |
+| Apagar y **borrar la BD** | `docker compose down -v` |
+| Logs (todos / PHP) | `docker compose logs -f` / `docker compose logs -f php` |
+| Shell en PHP | `docker compose exec php sh` |
+| Comando de PHP como usuario de migraciones | `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com` |
+| Datos de demostración (crear / borrar) | `bin/as-migrator php scripts/seed-demo.php 35` / `… --clean` |
+| Comprobar la conexión a MySQL | `docker compose exec php php scripts/db-check.php` |
+| Ejecutar un `.sql` como root | `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < archivo.sql` |
+| Reiniciar nginx tras cambiar `docker/nginx/default.conf` | `docker compose restart nginx` |
 
-`APP_ENV` (por defecto `local`) decide dos cosas:
+### Copias de seguridad
 
-- **Qué configuración de PHP se carga.** `docker/php/php.ini` es **segura por defecto**: `display_errors` y `display_startup_errors` apagados (los errores van solo al log y un fallo grave responde 500 con el cuerpo vacío). `docker/php/php.local.ini` (errores en pantalla y revalidación de archivos) solo se carga con `APP_ENV=local`, mediante `PHP_INI_SCAN_DIR` en `docker-compose.yml`. Cualquier otro valor, o uno mal escrito, queda en modo seguro.
-- **Si existe `status.php`**, que enseña versiones: solo en `local`.
+```bash
+# Copia
+docker compose exec -T db sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --default-character-set=utf8mb4 crud_usuarios' > copia-$(date +%F).sql
 
-Tras cambiar `APP_ENV` en `.env`, recrea el contenedor con `docker compose up -d`. En `local` un error fatal se muestra en pantalla (y PHP responde 200: así se comporta con `display_errors` activo); en producción responde 500 sin cuerpo y el detalle queda en `docker compose logs php`.
+# Restauración (sobre una base vacía o la misma)
+docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-character-set=utf8mb4 crud_usuarios' < copia-2026-01-31.sql
+```
 
-## Búsqueda
+Haz una copia **antes de cada migración**. La copia contiene los hashes de las contraseñas: trátala como un dato sensible.
 
-El listado tiene un buscador: `index.php?q=texto`. Es una petición **GET**, así que la URL se puede copiar, compartir y recargar.
+### Actualizar a una versión nueva
 
-- **Qué busca:** en nombre, apellido, nombre completo (`Laura Gómez`), correo y teléfono.
-- **Mayúsculas y tildes se ignoran:** `gomez`, `GÓMEZ` y `Gómez` encuentran lo mismo. Lo decide la collation de la tabla (`utf8mb4_unicode_ci`), no PHP.
-- **Los espacios repetidos se juntan** (`laura   gomez` equivale a `laura gomez`), el texto se recorta a 254 caracteres y lo que no sea texto (`?q[]=x`) cuenta como "sin búsqueda".
-- **`%`, `_` y `\` se buscan tal cual:** en `LIKE` son comodines, y `UserSearch::likePattern()` los escapa para que `100%` encuentre `100%` y no todo. Esto exige que `sql_mode` de MySQL no incluya `NO_BACKSLASH_ESCAPES` (por defecto no lo incluye; `tests/smoke.sh` lo comprueba).
-- **Sin resultados** responde **200** con el mensaje "No se encontraron resultados para «…»": la búsqueda se completó, simplemente no hay filas.
-- **Límite conocido:** una consulta `LIKE '%texto%'` no puede usar un índice y recorre la tabla (con 200.000 usuarios, ~230 ms): sin problema con cientos o miles de usuarios.
+```bash
+git pull
+docker compose up -d --build                    # reconstruye PHP si cambió el Dockerfile
+# aplica en orden las migraciones nuevas de database/migrations/ (ver «Migraciones»)
+tests/run-all.sh                                # comprueba que todo sigue bien
+```
 
-## Paginación
+### Registros y diagnóstico
 
-El listado muestra 10 usuarios por página: `index.php?page=2` (y `index.php?q=laura&page=2` con búsqueda). La página 1 y la búsqueda vacía no se escriben en la URL, así que cada estado tiene una sola.
+Los errores van al log del contenedor (`docker compose logs php`) con una etiqueta: `[connection]` (sin conexión a la BD), `[query]` (una consulta falló, p. ej. por un permiso que falta) o `[config]` (falta una variable). Con `APP_ENV=local`, `/status.php` enseña las versiones y si la BD responde.
 
-- **`page` inválido** (vacío, `0`, negativo, decimal, letras, `?page[]=2`) cuenta como la página 1. **Pasado de rango** (`?page=999`) muestra la última, con 200.
-- **El estado se conserva:** los enlaces de página, «Editar», «Cancelar» y el regreso tras guardar o eliminar llevan la búsqueda y la página. Si se elimina al último usuario de la última página se muestra la nueva última, no una vacía. Crear vuelve a la página 1.
-- **Rendimiento (medido con 200.000 usuarios):** una página lejana (`OFFSET 190000`) cuesta ~60 ms, y un `COUNT(*)` ~23 ms sin búsqueda o ~230 ms con ella. La paginación por clave (`WHERE id < :último`) sería ~0,3 ms siempre, pero no permite saltar a una página ni numerarlas.
-- **`LIMIT` y `OFFSET`** se enlazan con `PDO::PARAM_INT` (`bind_all()`): con consultas nativas MySQL perdona un texto, con emuladas no.
-- **Datos de demostración:** `bin/as-migrator php scripts/seed-demo.php 35` crea 35 usuarios `demo-NNN@example.com`; `--clean` los borra.
+## Puesta en producción
 
-## Documento, fecha de nacimiento y rol
+Esta configuración está pensada para **desarrollo y pruebas**. Antes de exponerla a usuarios reales:
 
-Cada usuario tiene tres campos más (mejora 3): `document`, `birth_date` y `role`.
-
-- **Documento:** opcional y **único**. Es texto (conserva ceros a la izquierda), se guarda en **mayúsculas**, de 5 a 20 caracteres (letras, números y guiones). Dos usuarios no pueden tener el mismo; varios sin documento sí (se guarda `NULL`). Se busca también desde el buscador.
-- **Fecha de nacimiento:** opcional, `AAAA-MM-DD`, una fecha que exista, no futura y no anterior a 1900.
-- **Rol:** obligatorio, uno de `user` (Usuario, el valor por defecto), `editor` o `admin`. Solo una **etiqueta**: no da ningún permiso hasta el inicio de sesión (mejora 5). La lista válida está en `user_roles()` y debe coincidir con el `ENUM` de la BD (una prueba de integración lo comprueba).
-- **Migración:** una BD que ya tiene datos recibe las columnas con `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/migrations/001-more-fields.sql`. Se aplica **una sola vez** (la segunda falla sin cambiar nada). Los usuarios existentes quedan con documento y fecha vacíos y rol `user`. Una instalación nueva ya trae las columnas por `01-schema.sql`: hay que mantener las dos cosas a la vez.
-- **Los envíos sin `role`** (por ejemplo con `curl`, como antes de esta mejora) responden 422.
-
-## Interfaz
-
-La interfaz usa una **hoja de estilos propia** (`src/public/css/app.css`, sin Bootstrap ni ninguna librería) y no depende de internet.
-
-- **Dirección:** tranquila y orgánica: neutros con un matiz verde de liquen, un único acento pino, esquinas redondeadas de varios tamaños y, como detalle propio, las **iniciales de cada persona en «guijarros»** de forma ligeramente irregular (el color sale del correo, así que una persona siempre tiene el mismo). Tipografía del sistema (sin descargar fuentes).
-- **Tokens:** todos los colores, radios y tiempos están al principio de `app.css` como variables (`--primary`, `--surface`, `--r-lg`...). Cambiar el acento es cambiar `--primary` (y su par oscuro dentro de `@media (prefers-color-scheme: dark)`).
-- **Modo oscuro** automático (según el sistema) y **movimiento reducido** respetado. Contraste de texto de 4,5:1 o más y borde de los campos de 3:1 o más (medidos con un script), foco visible en todo, enlace «Saltar al contenido», formularios con etiquetas y errores asociados (`aria-describedby`, `aria-invalid`).
-- **Pantallas:** en escritorio el listado es una tabla; por debajo de 1000 px se ocultan las columnas secundarias (nacimiento y creación) y por debajo de 720 px cada fila pasa a una tarjeta. Los formularios van en una columna estrecha de 40 rem, de dos en dos columnas en pantallas anchas.
-- **Iconos:** `img/icons.svg` (trazo lineal); `icon('nombre')` (en `app/support.php`) los pinta y solo acepta una lista cerrada de nombres. `asset('css/app.css')` añade la fecha del archivo a la URL (`?v=...`), así que un cambio de estilos se ve al recargar sin vaciar la caché.
-- **JavaScript** (`public/js/app.js`, sin dependencias): la confirmación de eliminar es un `<dialog>` propio (Escape o un clic fuera lo cancelan, el foco empieza en «Cancelar»; sin `<dialog>` usa `confirm()`), los avisos se cierran con su botón y un formulario enviado desactiva sus botones para que un doble clic no lo envíe dos veces.
-- **Probado** con Playwright en Firefox (escritorio, tableta y móvil, modo claro y oscuro, teclado y movimiento reducido) y con `tests/smoke.sh`. **No se ha probado en Chrome ni en Safari.**
-
-## Arquitectura (por capas)
-
-Cada pieza tiene **una sola responsabilidad** y no hace lo de las demás:
-
-| Capa | Dónde | Qué hace | Qué NO hace |
-|------|-------|----------|-------------|
-| Página | `public/*.php` | Arranca y llama a un método de un controlador (7 líneas) | Nada más |
-| Controlador | `app/Controller/` | Comprueba quién pide (origen, sesión, CSRF), lee la petición, llama al validador y al repositorio, elige la vista o la redirección | No tiene SQL ni HTML |
-| Validación | `app/Validation/UserValidator.php` | Campos y reglas de un usuario, **las mismas** al crear y al editar | No toca la BD ni la petición |
-| Repositorio | `app/Repository/` | **El único lugar con SQL**: buscar, contar, crear, actualizar, eliminar y restaurar | No sabe de HTTP ni de HTML |
-| Entidad | `app/Domain/User.php` | Los datos de un usuario, tipados e inmutables | No sabe de SQL |
-| Vista | `views/` | HTML con la mínima lógica, todo escapado | No consulta la BD ni lee la petición |
-
-- **Autoload (Composer):** `composer.json` define `App\` -> `app/` (PSR-4): una clase por archivo, y el nombre de la clase es su ruta. `bootstrap.php` carga `vendor/autoload.php`. `vendor/` no se sube a git: lo genera `composer install`, y el contenedor `php` lo hace solo al arrancar si falta (`docker/php/entrypoint.sh`).
-- **Inyección de dependencias:** `UserRepository` recibe el `PDO` en el constructor en lugar de crearlo o leer una variable global. Así no depende de cómo se conecta (las pruebas le dan una tabla temporal) y la dependencia es visible. `Container` construye las piezas; la conexión es **perezosa** (no se abre hasta que se pide un repositorio) porque hay peticiones que se rechazan sin tocar la BD (un id mal formado da 400 con la BD caída).
-- **Errores:** una consulta que falla lanza `PDOException`, una conexión imposible `DatabaseConnectionException` y un correo o documento repetido `DuplicateUserException`; el controlador las convierte con `Failure::describe()` (503, 500 y aviso sin detalles técnicos, el detalle va al log) o con el aviso del campo (409).
-- **Funciones que se quedaron como funciones** (`app/support.php`, `app/Security/`): `escape()`, `csrf_field()`, `require_login()`, `reject_foreign_origin()`... son ayudas de la petición y de las vistas que tocan `$_SESSION`, cabeceras y `exit`; en un framework serían *middleware*.
-- **Comprobado** con `src/tests/architecture.php` (ver «Pruebas»): si alguien pone SQL en una página o una vista sin `escape()`, falla.
-
-## Usuarios y claves (desarrollo)
-
-Estas son las cuentas que trae una instalación nueva (`.env.example` y `database/`). **Son claves de desarrollo conocidas: cámbialas o bórralas fuera de tu máquina.**
-
-| Cuenta | Para qué | Usuario | Clave | Dónde se define |
-|--------|----------|---------|-------|-----------------|
-| Administrador de la aplicación (un usuario con rol Administrador) | Entrar en `http://localhost:8080/login.php` | `admin@example.com` | `Admin-Demo-2026` | `database/02-seed.sql` |
-| Usuario de BD **de la aplicación** | Lo usa PHP en cada petición. Solo lee y escribe filas | `crud_app` | `crud_app_dev_2026` | `DB_USERNAME`/`DB_PASSWORD` en `.env` |
-| Usuario de BD **de migraciones** | Cambiar el esquema y tareas manuales (`bin/as-migrator`, pruebas) | `crud_migrator` | `crud_migrator_dev_2026` | `DB_MIGRATION_USERNAME`/`DB_MIGRATION_PASSWORD` en `.env` |
-| `root` de MySQL | Administrar el servidor (crear usuarios, bases de prueba) | `root` | `cambia-esta-clave-root` | `DB_ROOT_PASSWORD` en `.env` |
-
-Los dos usuarios de BD los crea `database/03-users.sh` (con las claves de `.env`) cuando se crea el volumen de MySQL; ese script se puede volver a ejecutar sin riesgo (`docker compose exec db bash /docker-entrypoint-initdb.d/03-users.sh`), por ejemplo tras cambiar una clave o en una BD que ya existía.
-
-## Mínimo privilegio en la base de datos
-
-La aplicación **no se conecta con un usuario que lo pueda todo**: si algún día hubiera una inyección SQL, el daño se limita a lo que el usuario de la BD puede hacer.
-
-- **Aplicación** (`DB_USERNAME`): `users` → `SELECT`, `INSERT`, `UPDATE`. **No puede** `DELETE` (eliminar es un `UPDATE`: borrado lógico), ni `DROP`/`ALTER`/`TRUNCATE`/`CREATE`, ni tablas temporales, ni leer `mysql.user`, ni tocar otras bases. **Sí puede** escribir `role` y `password_hash`, porque registra y edita administradores desde la pantalla de usuarios: una inyección SQL hipotética podría crear uno (es el precio de la función; antes, con la tabla `admins` aparte y sin `INSERT`, no podía).
-- **Migraciones** (`DB_MIGRATION_USERNAME`): todos los privilegios sobre `crud_usuarios`, y nada más (sin `GRANT OPTION`, sin otras bases). Se usa **a mano**: `bin/as-migrator <comando>` ejecuta un comando en el contenedor `php` con esa cuenta (crear administradores, `seed-demo.php`, las pruebas de integración) sin dejar que el contenedor la conozca: la aplicación web y `docker compose exec php ...` siguen con el usuario de la aplicación. Las migraciones de `database/migrations/` se aplican con `root` (`docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < ...`) o con el usuario de migraciones.
-- **Por qué dos usuarios:** quien puede cambiar el esquema no es quien atiende a Internet. La cuenta que se expone en cada petición es la que más probabilidades tiene de verse comprometida, así que debe poder hacer lo mínimo; la de migraciones solo existe cuando tú la usas.
-- **Borrado definitivo:** como la aplicación no puede `DELETE`, borrar de verdad a alguien (derecho de supresión) se hace con el usuario de migraciones o `root`.
-- **Si cambias las claves en `.env`** después del primer arranque, MySQL conserva las anteriores hasta que ejecutes `03-users.sh` (que las actualiza) o `docker compose down -v` (borra los datos). Con una BD que ya existía, añade `DB_MIGRATION_PASSWORD` a `.env` (si falta, `docker compose` lo avisa) y ejecuta `03-users.sh`.
-- **Probado** con `tests/privileges.sh` (60 comprobaciones).
-
-## Inicio de sesión
-
-Toda la aplicación (listado, alta, edición, eliminar, restaurar) exige haber iniciado sesión; `login.php` y `logout.php` son lo único público.
-
-- **Administradores:** un **usuario** con rol `admin`, activo y con contraseña (`users.password_hash`, el **hash bcrypt**, nunca la contraseña). Los registra otro administrador desde «Registrar usuario» (o los asciende desde «Editar»); el primero se crea desde la consola (`scripts/create-admin.php`). No hay registro público: nadie se hace administrador solo.
-- **Cambiar el acceso:** cambiar el correo cambia con qué correo entra; quitarle el rol de administrador **borra su hash**; eliminarlo (borrado lógico) le quita el acceso y restaurarlo se lo devuelve; la contraseña vacía al editar conserva la actual. **Nadie puede eliminarse ni quitarse el rol a sí mismo** (perdería el acceso). Una sesión ya abierta de alguien a quien le quitan el acceso sigue viva hasta que caduque (30 minutos sin actividad).
-- **Sin sesión:** cualquier página protegida responde **302 a `login.php`**, y un POST sin sesión (`delete.php`, `restore.php`...) **no cambia nada**. El orden es: método (405), origen (403), sesión (302), id (400), BD.
-- **Login:** «Credenciales inválidas.» (401) sea cual sea el fallo, y también tarda lo mismo (con un correo inexistente se calcula igualmente un hash ficticio), para no revelar qué correos existen. El POST comprueba el origen (si no, otro sitio podría iniciar su sesión en tu navegador).
-- **Sesión:** cookie `crud_session` con `HttpOnly` y `SameSite=Lax` (y `Secure` si `APP_ORIGIN` es `https://`); el id cambia al entrar (fijación de sesión). Caduca a los **30 minutos de inactividad** (cada petición lo renueva). El estado está en un archivo dentro del contenedor `php`: recrearlo cierra todas las sesiones.
-- **Cerrar sesión:** botón en el encabezado, es un POST (`logout.php`). Las páginas protegidas llevan `Cache-Control: no-store`.
-- **Límites:** sin límite de intentos fallidos (el diseño está en `plan.md`), sin recuperación de contraseña (solo la cambia otro administrador al editar), y sin HTTPS la contraseña viaja en claro. Solo el rol `admin` (con contraseña) concede acceso; los demás roles son etiquetas. `status.php` y Adminer no pasan por este login.
-- **Contraseñas:** de 10 a 72 bytes (bcrypt solo lee 72 y se corta en un byte NUL: se rechazan en vez de truncarlas).
-
-## Tokens CSRF
-
-Todos los formularios POST (login, crear y editar, eliminar, restaurar y cerrar sesión) llevan un campo oculto `csrf_token`: un valor al azar (32 bytes en hexadecimal) que vive **en la sesión del servidor**. Una página de otro sitio puede enviar un formulario a la aplicación y el navegador adjuntará tu cookie, pero no puede leer nuestras páginas y por eso no conoce el token.
-
-- **Qué pasa sin token válido:** **403** y no se cambia nada (también si es el de otra sesión, está truncado, va en mayúsculas, como arreglo, solo en la URL, en una cabecera o en una cookie: solo cuenta lo que llega en el cuerpo del POST). Orden: método (405), origen (403), sesión (302), **token (403)**, id (400), BD.
-- **Login:** si la página de entrada caducó, `login.php` responde 403 pero vuelve a pintar el formulario con un token nuevo y un aviso.
-- **Renovación:** el token cambia al iniciar sesión; es el mismo en todas las pestañas de una sesión.
-- **No sustituye a las otras capas** (comprobación de `Origin`, `SameSite=Lax`) ni protege contra XSS (un script inyectado en la página sí puede leerlo).
-- **Verlo en un navegador:** `tests/csrf-demo/` (página atacante y guía).
-
-## Borrado lógico y usuarios eliminados
-
-«Eliminar» ya no borra la fila: pone `active = 0` (migración 002) y el usuario deja de verse en el listado, el recuento, la búsqueda y las páginas. Los datos siguen en la BD (en Adminer se ven).
-
-- **Ver y restaurar:** el botón **Eliminados** abre `index.php?view=inactive`, con su propia búsqueda y paginación. Cada fila tiene **Restaurar** (`restore.php`, solo POST y solo desde el propio sitio), que la devuelve con todos sus datos. Restaurar a quien ya está activo no hace nada y lo avisa.
-- **Un eliminado no se edita:** `edit.php` responde 404; se restaura primero.
-- **El correo y el documento de un eliminado siguen ocupados** (los `UNIQUE` no cambian), así que no se pueden reutilizar para otra persona. Al intentarlo, el aviso lo explica («pertenece a un usuario eliminado, restáuralo desde «Eliminados»»). Restaurar nunca choca con nada.
-- **No hay «eliminar definitivamente»** en la aplicación. El borrado lógico no suprime los datos personales: para un derecho de supresión hace falta un `DELETE` real o anonimizar (ver `plan.md`, M4).
-- **Rendimiento:** el índice `idx_active_id (active, id)` mantiene rápida la vista de eliminados (con 200.000 usuarios y 20 eliminados: 30 ms sin el índice, 0,25 ms con él).
-- **Migración:** `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < database/migrations/002-active.sql` (una sola vez; los usuarios existentes quedan activos).
-
-## Ediciones simultáneas
-
-El formulario de edición lleva un campo oculto `row_token`: una huella (sha256) del contenido de la fila al abrirlo. Al guardar se compara con la fila **tal como está ahora**; si no coincide, otra persona la modificó mientras tanto y la respuesta es un **409** que no guarda nada, conserva lo escrito y pide recargar. Si otra persona guarda exactamente los mismos valores no hay conflicto. Un envío sin `row_token` (por ejemplo con `curl`) se acepta como siempre. Queda un margen de milisegundos entre la comprobación y el `UPDATE`; cerrarlo del todo exigiría una columna de versión en la tabla.
-
-## Fechas y zona horaria
-
-Las fechas se **guardan en UTC** y se **muestran en la zona de la aplicación** (`date.timezone` de `docker/php/php.ini`, hoy `America/Bogota`):
-
-- El servidor de MySQL arranca con `--default-time-zone=+00:00` y cada conexión de la aplicación ejecuta `SET time_zone = '+00:00'`, así que no depende de la configuración del servidor.
-- `created_at` es `DATETIME` (no `TIMESTAMP`, que no admite fechas posteriores a 2038) y se convierte con `format_utc_datetime()` al mostrarlo.
-- Adminer y el cliente `mysql` enseñan la hora **en UTC**: es la que hay guardada.
-
-## Cabeceras de seguridad
-
-Nginx añade `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` y una `Content-Security-Policy` en **todas** las respuestas (también en los errores), y oculta su versión. La CSP solo permite recursos **propios** (`'self'`): la interfaz no carga nada de fuera (ni CDN, ni fuentes, ni scripts de terceros) y **no se permiten scripts ni estilos en línea**: por eso el diálogo de eliminar usa `data-confirm` y `js/app.js` en lugar de un `onsubmit`, y los iconos son un SVG propio (`img/icons.svg`). Si añades una CDN, un script o un `<style>` en línea, hay que actualizar la política en `docker/nginx/default.conf` (y reiniciar nginx: `docker compose restart nginx`; un `reload` no siempre relee un archivo montado que se reescribió). Si algo no carga, la consola del navegador dice `Refused to ...` con la directiva que lo bloquea.
-
-## Manejo de errores
-
-El visitante siempre ve un mensaje genérico; el detalle va al log del contenedor (`docker compose logs php`).
-
-| Categoría | Excepción | HTTP | Etiqueta en el log |
-|-----------|-----------|------|--------------------|
-| Conexión (clave mala, BD apagada) | `DatabaseConnectionException` | 503 | `[connection]` |
-| Consulta (SQL inválido, permiso que falta) | `PDOException` | 500 | `[query]` |
-| Configuración (falta una variable) | `RuntimeException` | 500 | `[config]` |
-
-`App\Http\Failure::describe()` hace la traducción; un correo o documento repetido es `DuplicateUserException` y se convierte en el aviso del campo (409).
-
-Códigos que devuelve la aplicación (regla: si el envío no se completó, nunca es 200):
-
-| HTTP | Cuándo |
-|------|--------|
-| 200 | Páginas normales |
-| 302 | Tras crear, editar, eliminar o restaurar: redirección a `index.php?msg=...`; sin sesión, a `login.php`; tras iniciar sesión, a `index.php` |
-| 400 | `delete.php` o `restore.php` con un id mal formado |
-| 401 | `login.php` con credenciales incorrectas (siempre el mismo mensaje) |
-| 403 | Un POST desde un origen que no es el propio sitio, o sin un token CSRF válido |
-| 404 | `edit.php` con un id inválido, inexistente o eliminado; `status.php` fuera de `APP_ENV=local` |
-| 405 | `delete.php`, `restore.php` o `logout.php` con un método que no es POST (cabecera `Allow: POST`) |
-| 409 | Correo o documento duplicado (el `UNIQUE` de la BD) o edición simultánea (otra persona modificó al usuario) |
-| 422 | Datos del formulario inválidos |
-| 500 | Fallo de consulta o de configuración |
-| 503 | La BD no está disponible |
-
-## Hoja de ruta
-
-- **Fase 0** Entorno Docker funcionando
-- **MVP 1** Base de datos
-- **MVP 2** Conexión PDO y manejo de errores
-- **MVP 3** Listar (Read)
-- **MVP 4** Crear (Create)
-- **MVP 5** Editar (Update)
-- **MVP 6** Eliminar (Delete)
-- **MVP 7** Revisión, errores comunes y comparación con la guía
-- **Mejoras** 1 Búsqueda · 2 Paginación · 3 Más campos · 4 Borrado lógico · 5 Inicio de sesión · 6 CSRF · 7 Usuario de BD dedicado · 8 Separación en capas (todas hechas)
-- **Siguiente** (no planificado): front controller con router, PHPUnit, HTTPS, límite de intentos de login, cambio de contraseña; ver «Decisiones y límites» de cada mejora en `plan.md`
+- [ ] `APP_ENV=production` (PHP deja de mostrar errores y `status.php` responde 404).
+- [ ] **HTTPS delante**: termina TLS en un proxy inverso o balanceador y fija `APP_ORIGIN=https://tu-dominio` (activa la cookie `Secure`). Sin HTTPS la contraseña viaja en claro.
+- [ ] **Cambia todas las claves** de `.env` por valores largos y únicos (idealmente desde un gestor de secretos, no un archivo): `DB_PASSWORD`, `DB_MIGRATION_PASSWORD` y `DB_ROOT_PASSWORD`; ejecuta `03-users.sh` para aplicarlas.
+- [ ] **Borra el administrador de desarrollo** (`DELETE FROM users WHERE email = 'admin@example.com'`) y crea el tuyo con `create-admin.php`.
+- [ ] **Quita Adminer** del `docker-compose.yml` (o déjalo accesible solo por VPN).
+- [ ] No publiques los puertos de nginx directamente: que solo los alcance el proxy.
+- [ ] Limita el host de los usuarios de BD (`'crud_app'@'10.0.%'` en lugar de `%`).
+- [ ] Programa **copias de seguridad** de la base y prueba que se pueden restaurar.
+- [ ] Recoge los logs de los contenedores en un sistema central y vigila los errores 5xx.
+- [ ] Añade **límite de intentos** al inicio de sesión (no existe; ver más abajo) en el proxy o en la aplicación.
+- [ ] Guarda las sesiones fuera del contenedor si usas más de una instancia (hoy son archivos en `/tmp` de `php`).
+- [ ] Sustituye el montaje de `./src` por una imagen que lleve el código (`COPY` en el Dockerfile) y ejecuta `composer install --no-dev`.
 
 ## Solución de problemas
 
-**Los archivos creados desde el contenedor pertenecen a otro usuario.** El UID/GID del contenedor no coincide con el tuyo. Ejecuta `id -u` e `id -g`, ajusta `HOST_UID` y `HOST_GID` en `.env` y reconstruye: `docker compose up -d --build`.
+| Síntoma | Causa y solución |
+|---------|------------------|
+| No puedo entrar | Solo entra un usuario con rol *Administrador*, activo y con contraseña. Si nadie puede, crea uno: `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com`. Recrear el contenedor `php` cierra todas las sesiones. |
+| «Origen no permitido» (403) | Abres la aplicación con un origen distinto de `APP_ORIGIN` (p. ej. `127.0.0.1` en vez de `localhost`, u otro puerto). |
+| «Token de seguridad no válido» (403) | La sesión caducó o el formulario se abrió antes de volver a iniciar sesión: recarga la página. |
+| `docker compose` dice «Falta DB_MIGRATION_PASSWORD» | Añade `DB_MIGRATION_USERNAME` y `DB_MIGRATION_PASSWORD` a `.env` (ver `.env.example`), ejecuta `docker compose up -d` y `docker compose exec db bash /docker-entrypoint-initdb.d/03-users.sh`. |
+| 500 sin cuerpo y el log dice «Falta vendor/autoload.php» | `docker compose exec php composer install` (o `docker compose up -d --build`, que lo genera al arrancar). |
+| `command denied` en el log | El usuario de la aplicación solo tiene `SELECT`, `INSERT` y `UPDATE` sobre `users`. Si añades una consulta nueva, amplía `database/03-users.sh` y ejecútalo. |
+| Puerto ocupado | Cambia `APP_PORT` o `ADMINER_PORT` en `.env`. |
+| Los archivos creados desde el contenedor son de otro usuario | Ajusta `HOST_UID` y `HOST_GID` (`id -u`, `id -g`) y `docker compose up -d --build`. |
+| Tildes rotas (`Ã³`) al cargar datos | El cliente `mysql` usa `latin1`: añade `--default-character-set=utf8mb4`. Los scripts de `database/` ya llevan `SET NAMES utf8mb4`. |
+| Cambié la CSP y no surte efecto | `docker compose restart nginx` (un `reload` puede no releer un archivo montado que se reescribió). |
+| Xdebug no conecta | `XDEBUG_MODE=debug` en `.env`, `docker compose up -d`, escucha el puerto 9003 y revisa el firewall. |
 
-**Error de conexión o puerto ocupado.**
-- `php` espera a que MySQL esté sano (`healthcheck`); el primer arranque puede tardar. Revisa `docker compose ps` y `docker compose logs db`.
-- Si cambias las credenciales en `.env` después del primer arranque, MySQL conserva las anteriores: ejecuta `docker compose exec db bash /docker-entrypoint-initdb.d/03-users.sh` (actualiza las claves de los usuarios de la aplicación y de migraciones) o `docker compose down -v` (**borra los datos**). La clave de `root` solo se cambia con `down -v`.
-- Si `8080` u `8081` están ocupados, cambia `APP_PORT` o `ADMINER_PORT` en `.env`.
-- Si cambias una variable de `.env`, recrea los contenedores con `docker compose up -d`.
+## Desarrollo
 
-**Guardar, actualizar o eliminar responden "Origen no permitido" (403).** Estás abriendo la aplicación con un origen distinto de `APP_ORIGIN` (por ejemplo `http://127.0.0.1:8080` en lugar de `http://localhost:8080`, o un puerto distinto). Abre la dirección que coincide, o ajusta `APP_ORIGIN` en `.env` y ejecuta `docker compose up -d`.
+**Flujo.** Una rama por cambio, pruebas en verde y un commit con un asunto breve en imperativo. Antes de abrir una petición de cambios: `tests/run-all.sh`.
 
-**La BD se creó antes del cambio de `created_at` (sigue siendo `TIMESTAMP`).** Los scripts de `database/` solo corren con el volumen vacío. Para migrarla sin perder datos: `docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' <<< "ALTER TABLE users MODIFY created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;"` y `docker compose up -d` para que MySQL arranque en UTC. Los valores no cambian.
+**Convenciones.** Código, tablas y archivos en inglés; textos de la interfaz en español. `declare(strict_types=1);` en todo archivo PHP. Toda salida HTML con `escape()`. Credenciales solo por variables de entorno. Nada que no deba ser accesible por URL va dentro de `src/public/`.
 
-**Tildes como `Ã³` al cargar datos.** El cliente `mysql` del contenedor se conecta como `latin1`. El seed lleva `SET NAMES utf8mb4;` al inicio; tras corregirlo hay que recrear la BD.
+**Añadir un campo a los usuarios** (el recorrido completo):
+1. Migración nueva en `database/migrations/` **y** el mismo cambio en `01-schema.sql`; un script `tests/migration-00N.sh` que compruebe que coinciden.
+2. `User` (propiedad y `fromRow`), `UserValidator::fields()` y `validate()`, y los parámetros de `UserRepository`.
+3. La vista del formulario y la del listado.
+4. Si el campo se busca, `UserSearch`.
+5. Permisos: si la aplicación necesita algo que no tiene, `database/03-users.sh` y `tests/privileges.sh`.
+6. Pruebas unitarias, de integración y de punta a punta; `tests/run-all.sh`.
 
-**Una URL mal escrita muestra el listado (o el login) en vez de un 404.** Nginx envía todo lo que no existe a `index.php` (`try_files`), que pide sesión: sin ella redirige al login.
+**Añadir una consulta.** Va en un repositorio, con parámetros enlazados; nunca en un controlador ni en una vista (`architecture.php` falla si ocurre).
 
-**`Failed opening required ...` y la página responde 200.** Linux distingue mayúsculas y nombres exactos de archivo; con `display_errors` activo PHP muestra el fallo con estado 200.
+## Limitaciones conocidas y hoja de ruta
 
-**No puedo entrar (login).** Solo entra un usuario con rol *Administrador*, activo y con contraseña. Una instalación nueva trae `admin@example.com` (ver «Usuarios y claves»); si nadie puede entrar, crea uno con `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com`. Recrear el contenedor `php` cierra todas las sesiones (están en `/tmp` del contenedor).
+- **Sin límite de intentos de inicio de sesión.** Diseño propuesto en `plan.md` (retraso progresivo por correo y por IP); hoy conviene aplicarlo en el proxy.
+- **Una sesión abierta no se corta al instante** si a esa persona le quitan el acceso: caduca a los 30 minutos de inactividad o al reiniciar el contenedor `php`.
+- **Sin recuperación de contraseña**: la cambia otro administrador al editar el usuario. No hay jerarquía entre administradores.
+- **Sin borrado definitivo desde la interfaz.** Para suprimir datos personales de verdad (derecho de supresión) usa el usuario de migraciones o `root`; el borrado lógico no destruye el dato.
+- **Sin registro de auditoría** (quién cambió qué y cuándo).
+- Los roles `editor` y `user` son etiquetas sin permisos propios.
+- Probado en Firefox; falta verificación en Chrome y Safari.
+- Posibles siguientes pasos: enrutador con un único punto de entrada, PHPUnit, exportación e importación CSV, registro de auditoría, recuperación de contraseña por correo y segundo factor.
 
-**«Token de seguridad no válido» (403) al enviar un formulario.** La sesión caducó (30 minutos sin actividad) o se abrió el formulario antes de iniciar sesión de nuevo: recarga la página e inténtalo otra vez.
+## Documentación adicional
 
-**`docker compose` dice «Falta DB_MIGRATION_PASSWORD».** Añade `DB_MIGRATION_USERNAME` y `DB_MIGRATION_PASSWORD` a `.env` (ver `.env.example`) y ejecuta `docker compose up -d` y `docker compose exec db bash /docker-entrypoint-initdb.d/03-users.sh`.
-
-**La aplicación responde 500 sin cuerpo y el log dice «Falta vendor/autoload.php».** `vendor/` no está en git: `docker compose exec php composer install` (o reinicia el contenedor `php`, que lo genera al arrancar tras `docker compose up -d --build`).
-
-**`SQLSTATE ... command denied` en el log.** El usuario de BD de la aplicación solo puede `SELECT`, `INSERT` y `UPDATE` en lo que necesita (mínimo privilegio): si añades una consulta nueva, amplía `database/03-users.sh` y vuelve a ejecutarlo; los scripts de consola que cambian datos se lanzan con `bin/as-migrator`.
-
-**Xdebug no conecta con VS Code.** Pon `XDEBUG_MODE=debug` en `.env`, ejecuta `docker compose up -d`, arranca "Escuchar Xdebug (Docker)" (puerto 9003) y revisa el firewall.
+- [`plan.md`](plan.md): diario de desarrollo. Cada mejora (búsqueda, paginación, borrado lógico, sesión, CSRF, mínimo privilegio, capas, interfaz y acceso de administradores) con sus decisiones, alternativas descartadas, mediciones y límites.
+- [`tests/csrf-demo/`](tests/csrf-demo/README.md): una página «atacante» y una guía para ver en el navegador qué protege cada capa contra CSRF.

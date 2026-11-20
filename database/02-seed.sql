@@ -5,7 +5,7 @@ INSERT INTO users (name, last_name, email, phone) VALUES
     ('Valentina', 'Rojas', 'valentina.rojas@example.com', NULL);
 
 -- Administrador de DESARROLLO para poder entrar en la aplicacion: un usuario con rol admin y contrasena. Correo:
--- admin@example.com; la contrasena esta en el README (seccion "Usuarios y claves"). Es una cuenta de demostracion con
+-- admin@example.com; la contrasena esta en el README (seccion "Cuentas de desarrollo"). Es una cuenta de demostracion con
 -- una contrasena conocida: NO la uses fuera de tu maquina. En cualquier otro entorno borra esta fila
 -- (DELETE FROM users WHERE email = 'admin@example.com') y crea el tuyo con src/scripts/create-admin.php o desde
 -- la pantalla «Registrar usuario» con el rol Administrador. Lo que se guarda es el hash bcrypt, no la contrasena.
