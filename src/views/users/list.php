@@ -121,7 +121,7 @@ use App\Search\UserSearch;
                     <td data-label="Documento" class="num<?= $user->document === null ? ' is-empty is-muted' : '' ?>"><?= escape($user->document ?? '—') ?></td>
                     <td data-label="Nacimiento" class="col-secondary num<?= $user->birthDate === null ? ' is-empty is-muted' : '' ?>"><?= escape($user->birthDate ?? '—') ?></td>
                     <?php /* El rol viene de la BD (ENUM): se muestra su etiqueta, o la clave si algún día no estuviera en la lista. */ ?>
-                    <td data-label="Rol"><span class="tag tag--<?= escape($user->role) ?>"><?= escape(User::roleLabel($user->role)) ?></span></td>
+                    <td data-label="Rol"><span class="tag tag--<?= escape($user->role) ?>"><?= escape(User::roleLabel($user->role)) ?></span><?php if ($user->hasAccess): ?><span class="access" title="Puede iniciar sesión" role="img" aria-label="Puede iniciar sesión"><?= icon('key') ?></span><?php endif; ?></td>
                     <td data-label="Creado" class="col-secondary num is-muted"><?= escape(format_utc_datetime($user->createdAt)) ?></td>
                     <td class="cell-actions">
                         <?php if ($isInactiveView): ?>

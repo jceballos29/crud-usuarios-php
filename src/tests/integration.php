@@ -225,12 +225,10 @@ section('Mejora 4: el índice (active, id) existe');
 // que el índice se USA con muchas filas se midió aparte con 200.000 (ver plan.md, M4). Esto solo vigila que exista.
 same('idx_active_id es un índice de (active, id)', ['active', 'id'], $pdo->query("SELECT COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_active_id' ORDER BY SEQ_IN_INDEX")->fetchAll(PDO::FETCH_COLUMN));
 
-section('Mejora 5: AdminAuth::authenticate() contra la tabla admins');
-$pdo->exec('CREATE TEMPORARY TABLE admins_itest LIKE admins');
-$pdo->exec('ALTER TABLE admins_itest RENAME TO admins');
+section('Mejora 5: AdminAuth::authenticate() (un administrador es un usuario con rol admin y contraseña)');
 $secret = 'una-clave-de-prueba-123';
-$pdo->prepare('INSERT INTO admins (email, password_hash) VALUES (:e, :h)')->execute([':e' => 'root@example.com', ':h' => password_hash($secret, PASSWORD_DEFAULT)]);
-$adminId = (int) $pdo->query("SELECT id FROM admins WHERE email = 'root@example.com'")->fetchColumn();
+$pdo->prepare("INSERT INTO users (name, last_name, email, role, password_hash) VALUES ('Raiz', 'Admin', :e, 'admin', :h)")->execute([':e' => 'root@example.com', ':h' => password_hash($secret, PASSWORD_DEFAULT)]);
+$adminId = (int) $pdo->query("SELECT id FROM users WHERE email = 'root@example.com'")->fetchColumn();
 same('correo y contraseña correctos', ['id' => $adminId, 'email' => 'root@example.com'], AdminAuth::authenticate($admins, 'root@example.com', $secret));
 same('el correo no distingue mayúsculas ni espacios alrededor', ['id' => $adminId, 'email' => 'root@example.com'], AdminAuth::authenticate($admins, '  ROOT@Example.COM ', $secret));
 same('contraseña incorrecta', null, AdminAuth::authenticate($admins, 'root@example.com', 'otra-clave-distinta'));
@@ -243,36 +241,35 @@ same('la clave correcta con un NUL al final no entra', null, AdminAuth::authenti
 same('una contraseña de 2000 bytes se rechaza sin hashearla ni dar error', null, AdminAuth::authenticate($admins, 'root@example.com', str_repeat('a', 2000)));
 same('la clave correcta seguida de basura DESPUÉS de un NUL no entra (bcrypt lee hasta el NUL)', null, AdminAuth::authenticate($admins, 'root@example.com', $secret . "\0cualquier-cosa"));
 same('la clave correcta con 72 bytes de sobra tampoco (bcrypt solo lee 72)', null, AdminAuth::authenticate($admins, 'root@example.com', str_pad($secret, 80, 'x')));
-same('...y una contraseña de 72 bytes que SÍ es la guardada sí entra', ['id' => (int) $pdo->query("SELECT id FROM admins WHERE email = 'root@example.com'")->fetchColumn(), 'email' => 'root@example.com'], (function () use ($pdo, $admins): ?array {
+same('...y una contraseña de 72 bytes que SÍ es la guardada sí entra', ['id' => (int) $pdo->query("SELECT id FROM users WHERE email = 'root@example.com'")->fetchColumn(), 'email' => 'root@example.com'], (function () use ($pdo, $admins): ?array {
     $long = str_repeat('k', 72);
-    $pdo->prepare('UPDATE admins SET password_hash = :h WHERE email = :e')->execute([':h' => password_hash($long, PASSWORD_DEFAULT), ':e' => 'root@example.com']);
+    $pdo->prepare('UPDATE users SET password_hash = :h WHERE email = :e')->execute([':h' => password_hash($long, PASSWORD_DEFAULT), ':e' => 'root@example.com']);
     $result = AdminAuth::authenticate($admins, 'root@example.com', $long);
-    $pdo->prepare('UPDATE admins SET password_hash = :h WHERE email = :e')->execute([':h' => password_hash('una-clave-de-prueba-123', PASSWORD_DEFAULT), ':e' => 'root@example.com']);
+    $pdo->prepare('UPDATE users SET password_hash = :h WHERE email = :e')->execute([':h' => password_hash('una-clave-de-prueba-123', PASSWORD_DEFAULT), ':e' => 'root@example.com']);
 
     return $result;
 })());
 foreach (["' OR '1'='1", "root@example.com' -- ", "x' OR 1=1 -- ", '%', 'root@example.com%'] as $injection) {
     same('«' . $injection . '» como correo no entra', null, AdminAuth::authenticate($admins, $injection, $secret));
 }
-same('el hash guardado no es la contraseña ni la contiene', [true, false], [str_starts_with((string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn(), '$2y$'), str_contains((string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn(), $secret)]);
+same('el hash guardado no es la contraseña ni la contiene', [true, false], [str_starts_with((string) $pdo->query('SELECT password_hash FROM users WHERE id = ' . $adminId)->fetchColumn(), '$2y$'), str_contains((string) $pdo->query('SELECT password_hash FROM users WHERE id = ' . $adminId)->fetchColumn(), $secret)]);
 
 $cheap = password_hash($secret, PASSWORD_BCRYPT, ['cost' => 4]);
-$pdo->prepare('UPDATE admins SET password_hash = :h WHERE id = :id')->execute([':h' => $cheap, ':id' => $adminId]);
+$pdo->prepare('UPDATE users SET password_hash = :h WHERE id = :id')->execute([':h' => $cheap, ':id' => $adminId]);
 same('una contraseña correcta con un hash de coste 4 entra...', ['id' => $adminId, 'email' => 'root@example.com'], AdminAuth::authenticate($admins, 'root@example.com', $secret));
-$after = (string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn();
+$after = (string) $pdo->query('SELECT password_hash FROM users WHERE id = ' . $adminId)->fetchColumn();
 same('...y el hash se recalcula con el coste actual (password_needs_rehash)', [false, true], [password_needs_rehash($after, PASSWORD_DEFAULT), $after !== $cheap]);
 same('...y la contraseña sigue valiendo con el hash nuevo', true, password_verify($secret, $after));
-$pdo->prepare('UPDATE admins SET password_hash = :h WHERE id = :id')->execute([':h' => $cheap, ':id' => $adminId]);
+$pdo->prepare('UPDATE users SET password_hash = :h WHERE id = :id')->execute([':h' => $cheap, ':id' => $adminId]);
 AdminAuth::authenticate($admins, 'root@example.com', 'contraseña-incorrecta');
-same('una contraseña INCORRECTA no recalcula nada', $cheap, (string) $pdo->query('SELECT password_hash FROM admins WHERE id = ' . $adminId)->fetchColumn());
+same('una contraseña INCORRECTA no recalcula nada', $cheap, (string) $pdo->query('SELECT password_hash FROM users WHERE id = ' . $adminId)->fetchColumn());
 $duplicate = null;
 try {
-    $pdo->prepare('INSERT INTO admins (email, password_hash) VALUES (:e, :h)')->execute([':e' => 'ROOT@example.com', ':h' => $cheap]);
+    $pdo->prepare("INSERT INTO users (name, last_name, email, role, password_hash) VALUES ('Otro', 'Raiz', :e, 'admin', :h)")->execute([':e' => 'ROOT@example.com', ':h' => $cheap]);
 } catch (PDOException $error) {
     $duplicate = $error->errorInfo[1] ?? null;
 }
 same('el correo del administrador es único (también con otra capitalización)', 1062, $duplicate);
-$pdo->exec('DROP TEMPORARY TABLE admins');
 
 section('Mejora 8: UserRepository (la única capa con SQL de usuarios)');
 $idByEmail = static fn(string $email): int => (int) $pdo->query("SELECT id FROM users WHERE email = '$email'")->fetchColumn();
@@ -334,6 +331,79 @@ same('page() de la vista de eliminados marca active = false', [false], array_val
 
     return $page;
 })()))));
+
+section('Acceso: solo entra quien es administrador, está activo y tiene contraseña');
+$rootId = $adminId;
+$pdo->prepare('UPDATE users SET password_hash = :h WHERE id = :id')->execute([':h' => password_hash($secret, PASSWORD_DEFAULT), ':id' => $rootId]);
+$entry = static fn(): ?array => AdminAuth::authenticate($admins, 'root@example.com', $secret);
+$ok = ['id' => $rootId, 'email' => 'root@example.com'];
+same('un administrador activo con contraseña entra', $ok, $entry());
+$pdo->exec("UPDATE users SET role = 'editor' WHERE id = $rootId");
+same('con el rol «editor» NO entra, aunque la contraseña sea correcta', null, $entry());
+$pdo->exec("UPDATE users SET role = 'user' WHERE id = $rootId");
+same('con el rol «user» tampoco', null, $entry());
+$pdo->exec("UPDATE users SET role = 'admin', active = 0 WHERE id = $rootId");
+same('un administrador ELIMINADO (borrado lógico) NO entra', null, $entry());
+$pdo->exec("UPDATE users SET active = 1 WHERE id = $rootId");
+same('...y al restaurarlo vuelve a entrar con la misma contraseña', $ok, $entry());
+$pdo->exec("UPDATE users SET password_hash = NULL WHERE id = $rootId");
+same('un administrador SIN contraseña no entra (con cualquier clave, también vacía)', [null, null, null], [$entry(), AdminAuth::authenticate($admins, 'root@example.com', ''), AdminAuth::authenticate($admins, 'root@example.com', 'x')]);
+$pdo->prepare('UPDATE users SET password_hash = :h WHERE id = :id')->execute([':h' => password_hash($secret, PASSWORD_DEFAULT), ':id' => $rootId]);
+same('findByEmail() solo devuelve lo que sirve para entrar (nada más que id, correo y hash)', ['id', 'email', 'password_hash'], array_keys($admins->findByEmail('root@example.com') ?? []));
+same('...y no encuentra a un usuario normal (itest-04, sin contraseña)', null, $admins->findByEmail('itest-04@example.com'));
+same('grantAccess() promueve a un usuario existente (false = no creó uno nuevo)', [false, 'admin', true], (function () use ($admins, $pdo): array {
+    $result = $admins->grantAccess('itest-04@example.com', AdminAuth::hash('clave-de-itest-04'));
+    $row = $pdo->query("SELECT role, active, password_hash IS NOT NULL AS has FROM users WHERE email = 'itest-04@example.com'")->fetch();
+
+    return [$result, $row['role'], (int) $row['active'] === 1 && (int) $row['has'] === 1];
+})());
+same('...y esa persona entra', true, AdminAuth::authenticate($admins, 'itest-04@example.com', 'clave-de-itest-04') !== null);
+same('grantAccess() con un correo nuevo crea el usuario «Administrador» (true)', [true, 'Administrador', 'nuevo-itest', 'admin'], (function () use ($admins, $pdo): array {
+    $result = $admins->grantAccess('nuevo-itest@example.com', AdminAuth::hash('clave-de-nuevo-itest'));
+    $row = $pdo->query("SELECT name, last_name, role FROM users WHERE email = 'nuevo-itest@example.com'")->fetch();
+
+    return [$result, $row['name'], $row['last_name'], $row['role']];
+})());
+
+section('UserRepository: crear y editar con contraseña (el hash, nunca la contraseña)');
+$hashOf = static fn(string $email): ?string => ($v = $pdo->query("SELECT password_hash FROM users WHERE email = '$email'")->fetchColumn()) === false || $v === null ? null : (string) $v;
+$adminData = static fn(string $email, string $password, string $role = 'admin'): array => $validator->read(['name' => 'Pass', 'last_name' => 'Itest', 'email' => $email, 'role' => $role, 'password' => $password, 'password_confirm' => $password]);
+$repo->create($adminData('itest-pass1@example.com', 'una-clave-larga-1'));
+$h1 = $hashOf('itest-pass1@example.com');
+same('create() con rol admin y contraseña guarda un bcrypt que verifica', [true, true, false], [$h1 !== null && str_starts_with($h1, '$2y$'), $h1 !== null && password_verify('una-clave-larga-1', $h1), $h1 !== null && str_contains($h1, 'una-clave-larga-1')]);
+same('...y esa persona entra', true, AdminAuth::authenticate($admins, 'itest-pass1@example.com', 'una-clave-larga-1') !== null);
+same('...y su ficha dice que tiene acceso', true, $repo->findActive($idByEmail('itest-pass1@example.com'))?->hasAccess);
+$repo->create($adminData('itest-pass2@example.com', 'una-clave-larga-2', 'editor'));
+same('create() con rol editor IGNORA la contraseña (no se guarda nada)', [null, false], [$hashOf('itest-pass2@example.com'), $repo->findActive($idByEmail('itest-pass2@example.com'))?->hasAccess]);
+$repo->create($adminData('itest-pass3@example.com', '', 'admin'));
+same('create() de un admin sin contraseña (lo que ya había antes de esta función) lo deja sin acceso', [null, null], [$hashOf('itest-pass3@example.com'), AdminAuth::authenticate($admins, 'itest-pass3@example.com', '')]);
+$id1 = $idByEmail('itest-pass1@example.com');
+$repo->update($id1, $adminData('itest-pass1@example.com', ''));
+same('update() de un admin con la contraseña VACÍA conserva el hash', $h1, $hashOf('itest-pass1@example.com'));
+$repo->update($id1, $adminData('itest-pass1@example.com', 'otra-clave-larga-9'));
+$h1b = $hashOf('itest-pass1@example.com');
+same('update() con una contraseña nueva la reemplaza (la vieja deja de valer)', [true, false, true], [$h1b !== $h1, AdminAuth::authenticate($admins, 'itest-pass1@example.com', 'una-clave-larga-1') !== null, AdminAuth::authenticate($admins, 'itest-pass1@example.com', 'otra-clave-larga-9') !== null]);
+$repo->update($id1, $adminData('itest-pass1@example.com', '', 'editor'));
+same('update() que le quita el rol de administrador BORRA el hash (deja de poder entrar)', [null, null], [$hashOf('itest-pass1@example.com'), AdminAuth::authenticate($admins, 'itest-pass1@example.com', 'otra-clave-larga-9')]);
+$repo->update($id1, $adminData('itest-pass1@example.com', 'tercera-clave-larga', 'admin'));
+same('...y al volver a ascenderlo con contraseña entra otra vez', true, AdminAuth::authenticate($admins, 'itest-pass1@example.com', 'tercera-clave-larga') !== null);
+same('el correo cambiado en la edición es el que vale para entrar (una sola fuente de verdad)', [null, true], (function () use ($repo, $admins, $adminData, $id1): array {
+    $repo->update($id1, $adminData('itest-pass1-nuevo@example.com', ''));
+
+    return [AdminAuth::authenticate($admins, 'itest-pass1@example.com', 'tercera-clave-larga'), AdminAuth::authenticate($admins, 'itest-pass1-nuevo@example.com', 'tercera-clave-larga') !== null];
+})());
+$repo->deactivate($id1);
+same('eliminar (borrado lógico) a un administrador le quita el acceso...', null, AdminAuth::authenticate($admins, 'itest-pass1-nuevo@example.com', 'tercera-clave-larga'));
+$repo->restore($id1);
+same('...y restaurarlo se lo devuelve', true, AdminAuth::authenticate($admins, 'itest-pass1-nuevo@example.com', 'tercera-clave-larga') !== null);
+same('el listado marca el acceso y NO trae nunca el hash', [true, false], (function () use ($repo): array {
+    $found = array_values(array_filter($repo->page('itest-pass1', true, 10, 0), static fn(User $u): bool => $u->email === 'itest-pass1-nuevo@example.com'));
+    $vars = $found === [] ? [] : array_keys(get_object_vars($found[0]));
+
+    return [$found !== [] && $found[0]->hasAccess, in_array('passwordHash', $vars, true) || in_array('password_hash', $vars, true)];
+})());
+$pdo->exec("DELETE FROM users WHERE email LIKE 'itest-pass%' OR email IN ('root@example.com', 'ROOT@example.com', 'nuevo-itest@example.com')");
+$pdo->exec("UPDATE users SET role = 'user', password_hash = NULL WHERE email = 'itest-04@example.com'");
 
 section('Un texto hostil se trata como texto');
 foreach (["' OR '1'='1", "'; DROP TABLE users; --", '" OR 1=1 --', '%\' OR \'x\' LIKE \'%'] as $hostile) {

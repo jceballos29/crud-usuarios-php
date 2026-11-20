@@ -31,7 +31,10 @@ final class UserController
         'missing' => ['El usuario ya no existía, no se eliminó nada.', 'info'], // el estado deseado ya se cumplía
         'restored' => ['El usuario ha sido restaurado exitosamente.', 'success'],
         'not_restored' => ['El usuario no estaba eliminado, no se restauró nada.', 'info'],
+        'self' => ['No puedes eliminar tu propia cuenta: perderías el acceso. Pídele a otro administrador que lo haga.', 'info'],
     ];
+
+    private const PASSWORD_HINT = 'Mínimo 10 caracteres. Con ella esta persona podrá iniciar sesión en la aplicación.';
 
     public function __construct(private readonly Container $container)
     {
@@ -129,6 +132,7 @@ final class UserController
             'rowToken' => null,
             'returnState' => [], // un alta no viene de ninguna página: el usuario nuevo sale el primero
             'cancelUrl' => 'index.php',
+            'passwordHint' => self::PASSWORD_HINT,
         ]], 'Registrar', $admin);
     }
 
@@ -193,10 +197,21 @@ final class UserController
                         http_response_code(409);
                         $errorMessage = 'Otra persona modificó a este usuario mientras lo editabas. Recarga la página para ver los datos actuales: tus cambios no se han guardado.';
                     } elseif ($submitted) {
-                        $errors = $validator->validate($data);
+                        // Al ascender a alguien a administrador la contraseña es obligatoria; a quien ya lo es, vacía = conservar.
+                        $errors = $validator->validate($data, $user->role !== 'admin');
+
+                        // Nadie se quita a sí mismo el rol de administrador: perdería el acceso (y podría dejar la
+                        // aplicación sin nadie que entre). Se lo quita otro administrador.
+                        if ($userId === $admin['id'] && $data['role'] !== 'admin' && !isset($errors['role'])) {
+                            $errors['role'] = 'No puedes quitarte el rol de administrador a ti mismo: perderías el acceso.';
+                        }
 
                         if ($errors === []) {
                             if ($this->container->users()->update($userId, $data)) {
+                                if ($userId === $admin['id']) {
+                                    refresh_admin_session_email($data['email']); // el encabezado enseña el correo nuevo
+                                }
+
                                 Response::redirect(Pagination::listUrl($returnSearch, $returnPage, ['msg' => 'updated']));
                             }
 
@@ -244,6 +259,7 @@ final class UserController
                 'rowToken' => $rowToken,
                 'returnState' => Pagination::listState($returnSearch, $returnPage),
                 'cancelUrl' => Pagination::listUrl($returnSearch, $returnPage),
+                'passwordHint' => $user !== null && $user->hasAccess ? 'Déjala vacía para conservar la actual. Si escribes una, reemplaza a la anterior.' : self::PASSWORD_HINT,
             ],
         ], 'Editar usuario', $admin);
     }
@@ -256,7 +272,8 @@ final class UserController
             ['deleted', 'missing'],
             Pagination::VIEW_ACTIVE,
             'No se pudo eliminar el usuario',
-            'No se pudo eliminar'
+            'No se pudo eliminar',
+            static fn(int $id, array $admin): ?string => $id === $admin['id'] ? 'self' : null // nadie se elimina a sí mismo
         );
     }
 
@@ -280,8 +297,10 @@ final class UserController
      * @param callable(int): bool $operation Devuelve true si cambió algo.
      * @param array{0: string, 1: string} $messages [aviso si cambió algo, aviso si no].
      * @param string $returnView Vista a la que se vuelve.
+     * @param (callable(int, array{id: int, email: string}): ?string)|null $refuse Si devuelve una clave de aviso, la operación
+     *                                                                         NO se hace y se vuelve con ese aviso.
      */
-    private function changeState(callable $operation, array $messages, string $returnView, string $errorTitle, string $pageTitle): void
+    private function changeState(callable $operation, array $messages, string $returnView, string $errorTitle, string $pageTitle, ?callable $refuse = null): void
     {
         Response::requirePost();           // 405
         reject_foreign_origin();           // 403
@@ -301,6 +320,12 @@ final class UserController
             // último de la última página, el listado corrige la página y se vuelve a la nueva última.
             $returnSearch = UserSearch::parseTerm($_POST['q'] ?? null);
             $returnPage = Pagination::parsePage($_POST['page'] ?? null);
+
+            $refusal = $refuse !== null ? $refuse($userId, $admin) : null;
+
+            if ($refusal !== null) {
+                Response::redirect(Pagination::listUrl($returnSearch, $returnPage, ['msg' => $refusal], $returnView));
+            }
 
             // Idempotente: si ya estaba así, el estado deseado ya se cumple y no es un error. Pero no se dice
             // «hecho» si esta petición no cambió nada.

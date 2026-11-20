@@ -38,7 +38,7 @@ y luego aplicarle las "posibles mejoras" de la guía técnica original (XAMPP).
 | Update | `UPDATE` | `edit.php` |
 | Delete | `UPDATE ... SET active = 0` (borrado lógico) | `delete.php` |
 | Restore | `UPDATE ... SET active = 1` | `restore.php` |
-| Acceso | `SELECT` en `admins`; sesión y token CSRF | `login.php`, `logout.php` |
+| Acceso | `SELECT` del usuario con rol admin y contraseña; sesión y token CSRF | `login.php`, `logout.php` |
 
 Todas exigen haber iniciado sesión salvo `login.php`. El SQL vive solo en los repositorios (ver «Arquitectura»).
 
@@ -52,11 +52,12 @@ Tabla `users` (`database/01-schema.sql`):
 | `phone` | `VARCHAR(20)` | opcional (`NULL`) |
 | `document` | `VARCHAR(20)` | opcional, **único** (varios `NULL` conviven) |
 | `birth_date` | `DATE` | opcional |
-| `role` | `ENUM('user','editor','admin')` | obligatorio, por defecto `user` |
+| `role` | `ENUM('user','editor','admin')` | obligatorio, por defecto `user`; solo `admin` puede iniciar sesión |
+| `password_hash` | `VARCHAR(255)` | hash bcrypt de la contraseña; `NULL` = no puede iniciar sesión |
 | `active` | `TINYINT(1)` | 1 = visible, 0 = eliminado (borrado lógico); índice `(active, id)` |
 | `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP`, en UTC |
 
-Tabla `admins` (quienes inician sesión): `id`, `email` único, `password_hash` (bcrypt) y `created_at`. Los cambios de esquema posteriores a la primera instalación están en `database/migrations/`.
+**Quién puede iniciar sesión:** un usuario con rol `admin`, activo y con `password_hash`. No hay tabla aparte (existió hasta la migración 004). Los cambios de esquema posteriores a la primera instalación están en `database/migrations/`.
 
 ## Convenciones
 
@@ -109,8 +110,9 @@ docker compose up -d --build
 docker compose ps        # los 4 servicios en running; db en healthy
 ```
 
-- **Entrar:** http://localhost:8080/login.php. Una instalación nueva trae un administrador de **desarrollo** (`database/02-seed.sql`): correo `admin@example.com`, contraseña `Admin-Demo-2026` (todas las cuentas de desarrollo están en «Usuarios y claves»). Es una cuenta de demostración con una clave conocida: bórrala fuera de tu máquina (`DELETE FROM admins WHERE email = 'admin@example.com'`).
-- **Crear tu propio administrador:** `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com` (pide la contraseña, de 10 a 72 bytes, sin mostrarla). En una BD que ya existía, aplica antes la migración `003-admins.sql`; el administrador de desarrollo no se crea solo (el seed solo corre con el volumen vacío): para añadirlo, ejecuta a mano su `INSERT IGNORE` de `database/02-seed.sql`.
+- **Entrar:** http://localhost:8080/login.php. Una instalación nueva trae un administrador de **desarrollo** (`database/02-seed.sql`): correo `admin@example.com`, contraseña `Admin-Demo-2026` (todas las cuentas de desarrollo están en «Usuarios y claves»). Es un usuario más de la lista, con rol Administrador y una clave conocida: bórralo fuera de tu máquina (`DELETE FROM users WHERE email = 'admin@example.com'`).
+- **Registrar más administradores:** entra y pulsa **Registrar usuario**: con el rol *Administrador* aparecen los campos de contraseña (y repetirla). Esa persona podrá iniciar sesión con su correo y esa contraseña. También se puede **ascender** a un usuario existente (Editar, rol Administrador y una contraseña).
+- **El primer administrador** (o recuperar el acceso si nadie puede entrar): `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com` (pide la contraseña, de 10 a 72 bytes, sin mostrarla); si el correo ya era un usuario, lo promueve. En una BD que ya existía, aplica antes las migraciones hasta la `004-user-passwords.sql`.
 - Diagnóstico del stack: http://localhost:8080/status.php (solo con `APP_ENV=local`; en cualquier otro entorno responde 404 para no revelar versiones)
 - Adminer: http://localhost:8081 (sistema MySQL, servidor `db`; usuario y clave: ver «Usuarios y claves»)
 
@@ -144,7 +146,7 @@ Hay seis niveles y no necesitan instalar nada más que lo que ya usa el proyecto
 - **De integración** (`src/tests/integration.php`): los repositorios (`UserRepository`, `AdminRepository`: búsqueda, paginación, borrado lógico, duplicados, inicio de sesión) contra MySQL, sobre una tabla temporal que no toca tus datos. `bin/as-migrator php tests/integration.php` (necesita el usuario de migraciones: crea tablas temporales).
 - **De arquitectura** (`src/tests/architecture.php`): lee los archivos y comprueba que cada pieza cumple su sola responsabilidad: solo los repositorios ejecutan SQL, las páginas de `public/` y las vistas no tocan la BD, las vistas escapan toda salida y las clases se cargan por su nombre. `docker compose exec php php tests/architecture.php`.
 - **De permisos** (`tests/privileges.sh`): habla con MySQL como el usuario de la aplicación y el de migraciones y comprueba qué puede y qué NO puede hacer cada uno (`DROP`, `ALTER`, `DELETE`, `GRANT`, leer `mysql.user`...), y que `database/03-users.sh` es repetible y corrige a un usuario con demasiados permisos.
-- **De las migraciones** (`tests/migration-001.sh`, `-002.sh` y `-003.sh`): aplican `database/migrations/` a una BD temporal con el esquema anterior y comprueban que acaba igual que una instalación nueva. Usan root y borran sus bases temporales.
+- **De las migraciones** (`tests/migration-001.sh` a `-004.sh`): aplican `database/migrations/` a una BD temporal con el esquema anterior y comprueban que acaba igual que una instalación nueva. Usan root y borran sus bases temporales.
 - **De punta a punta** (`tests/smoke.sh`): el CRUD completo contra la aplicación levantada, con `curl`: códigos HTTP, redirecciones, cabeceras de seguridad, inicio y cierre de sesión (cookie, fijación, caducidad), token CSRF y origen en todos los POST, búsqueda, paginación, borrado lógico, escape, zona horaria, ediciones simultáneas, configuración según `APP_ENV` y limpieza. Crea un administrador de prueba (`smoke-admin@example.com`) con el usuario de migraciones y lo borra al terminar. Con `--with-db-stop` para y vuelve a levantar la BD para comprobar los 503. **Solo crea y borra usuarios `smoke-*@example.com`**; los demás no se tocan.
 
 Todos terminan con código 0 si todo pasa y con 1 si algo falla, así que sirven también para automatizarlos. Si cambias el puerto o el origen, usa `BASE_URL` y `ORIGIN`.
@@ -166,13 +168,14 @@ crud-usuarios-docker/
 │   ├── migration-001.sh     # Prueba de la migración 001 con bases temporales
 │   ├── migration-002.sh     # Prueba de la migración 002
 │   ├── migration-003.sh     # Prueba de la migración 003
+│   ├── migration-004.sh     # Prueba de la migración 004 (mueve a los administradores a users)
 │   ├── privileges.sh        # Permisos de la BD: qué puede y qué no puede cada usuario (M7)
 │   └── csrf-demo/           # Página «atacante» y guía para ver CSRF en el navegador (M6)
 ├── database/
 │   ├── 01-schema.sql        # Tabla users (instalación nueva)
-│   ├── 02-seed.sql          # 3 usuarios de prueba y el administrador de desarrollo
+│   ├── 02-seed.sql          # 3 usuarios de prueba y el administrador de desarrollo (otro usuario, con rol Administrador y contraseña)
 │   ├── 03-users.sh          # Crea los usuarios de la BD con mínimo privilegio (aplicación y migraciones), con las claves de .env
-│   └── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql, 002-active.sql, 003-admins.sql)
+│   └── migrations/          # Cambios de esquema para una BD que ya existe (001-more-fields.sql, 002-active.sql, 003-admins.sql, 004-user-passwords.sql)
 └── src/                     # Montado en /var/www/html
     ├── public/              # Raíz web: lo único que ve el navegador. Cada página: 7 líneas (arranque + un método de un controlador)
     │   ├── index.php        # Listado de usuarios (MVP 3)
@@ -206,7 +209,7 @@ crud-usuarios-docker/
     ├── tests/               # unit.php, integration.php, architecture.php y harness.php (común); fuera de public/
     └── scripts/             # Solo consola
         ├── db-check.php
-        ├── create-admin.php  # Crea un administrador (M5)
+        ├── create-admin.php  # Da acceso a un administrador desde la consola (crea o promueve a un usuario)
         ├── seed-demo.php   # Inserta/borra usuarios de demostración (demo-NNN@example.com)
         └── info.php
 ```
@@ -300,7 +303,7 @@ Estas son las cuentas que trae una instalación nueva (`.env.example` y `databas
 
 | Cuenta | Para qué | Usuario | Clave | Dónde se define |
 |--------|----------|---------|-------|-----------------|
-| Administrador de la aplicación | Entrar en `http://localhost:8080/login.php` | `admin@example.com` | `Admin-Demo-2026` | `database/02-seed.sql` |
+| Administrador de la aplicación (un usuario con rol Administrador) | Entrar en `http://localhost:8080/login.php` | `admin@example.com` | `Admin-Demo-2026` | `database/02-seed.sql` |
 | Usuario de BD **de la aplicación** | Lo usa PHP en cada petición. Solo lee y escribe filas | `crud_app` | `crud_app_dev_2026` | `DB_USERNAME`/`DB_PASSWORD` en `.env` |
 | Usuario de BD **de migraciones** | Cambiar el esquema y tareas manuales (`bin/as-migrator`, pruebas) | `crud_migrator` | `crud_migrator_dev_2026` | `DB_MIGRATION_USERNAME`/`DB_MIGRATION_PASSWORD` en `.env` |
 | `root` de MySQL | Administrar el servidor (crear usuarios, bases de prueba) | `root` | `cambia-esta-clave-root` | `DB_ROOT_PASSWORD` en `.env` |
@@ -311,7 +314,7 @@ Los dos usuarios de BD los crea `database/03-users.sh` (con las claves de `.env`
 
 La aplicación **no se conecta con un usuario que lo pueda todo**: si algún día hubiera una inyección SQL, el daño se limita a lo que el usuario de la BD puede hacer.
 
-- **Aplicación** (`DB_USERNAME`): `users` → `SELECT`, `INSERT`, `UPDATE`; `admins` → `SELECT` y `UPDATE(password_hash)`. **No puede** `DELETE` (eliminar es un `UPDATE`: borrado lógico), ni insertar administradores, ni `DROP`/`ALTER`/`TRUNCATE`/`CREATE`, ni tablas temporales, ni leer `mysql.user`, ni tocar otras bases.
+- **Aplicación** (`DB_USERNAME`): `users` → `SELECT`, `INSERT`, `UPDATE`. **No puede** `DELETE` (eliminar es un `UPDATE`: borrado lógico), ni `DROP`/`ALTER`/`TRUNCATE`/`CREATE`, ni tablas temporales, ni leer `mysql.user`, ni tocar otras bases. **Sí puede** escribir `role` y `password_hash`, porque registra y edita administradores desde la pantalla de usuarios: una inyección SQL hipotética podría crear uno (es el precio de la función; antes, con la tabla `admins` aparte y sin `INSERT`, no podía).
 - **Migraciones** (`DB_MIGRATION_USERNAME`): todos los privilegios sobre `crud_usuarios`, y nada más (sin `GRANT OPTION`, sin otras bases). Se usa **a mano**: `bin/as-migrator <comando>` ejecuta un comando en el contenedor `php` con esa cuenta (crear administradores, `seed-demo.php`, las pruebas de integración) sin dejar que el contenedor la conozca: la aplicación web y `docker compose exec php ...` siguen con el usuario de la aplicación. Las migraciones de `database/migrations/` se aplican con `root` (`docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" crud_usuarios' < ...`) o con el usuario de migraciones.
 - **Por qué dos usuarios:** quien puede cambiar el esquema no es quien atiende a Internet. La cuenta que se expone en cada petición es la que más probabilidades tiene de verse comprometida, así que debe poder hacer lo mínimo; la de migraciones solo existe cuando tú la usas.
 - **Borrado definitivo:** como la aplicación no puede `DELETE`, borrar de verdad a alguien (derecho de supresión) se hace con el usuario de migraciones o `root`.
@@ -322,12 +325,13 @@ La aplicación **no se conecta con un usuario que lo pueda todo**: si algún dí
 
 Toda la aplicación (listado, alta, edición, eliminar, restaurar) exige haber iniciado sesión; `login.php` y `logout.php` son lo único público.
 
-- **Administradores:** tabla `admins` (aparte de `users`), con el **hash bcrypt** de la contraseña, nunca la contraseña. Se crean solo desde la consola (`scripts/create-admin.php`); no hay registro público.
+- **Administradores:** un **usuario** con rol `admin`, activo y con contraseña (`users.password_hash`, el **hash bcrypt**, nunca la contraseña). Los registra otro administrador desde «Registrar usuario» (o los asciende desde «Editar»); el primero se crea desde la consola (`scripts/create-admin.php`). No hay registro público: nadie se hace administrador solo.
+- **Cambiar el acceso:** cambiar el correo cambia con qué correo entra; quitarle el rol de administrador **borra su hash**; eliminarlo (borrado lógico) le quita el acceso y restaurarlo se lo devuelve; la contraseña vacía al editar conserva la actual. **Nadie puede eliminarse ni quitarse el rol a sí mismo** (perdería el acceso). Una sesión ya abierta de alguien a quien le quitan el acceso sigue viva hasta que caduque (30 minutos sin actividad).
 - **Sin sesión:** cualquier página protegida responde **302 a `login.php`**, y un POST sin sesión (`delete.php`, `restore.php`...) **no cambia nada**. El orden es: método (405), origen (403), sesión (302), id (400), BD.
 - **Login:** «Credenciales inválidas.» (401) sea cual sea el fallo, y también tarda lo mismo (con un correo inexistente se calcula igualmente un hash ficticio), para no revelar qué correos existen. El POST comprueba el origen (si no, otro sitio podría iniciar su sesión en tu navegador).
 - **Sesión:** cookie `crud_session` con `HttpOnly` y `SameSite=Lax` (y `Secure` si `APP_ORIGIN` es `https://`); el id cambia al entrar (fijación de sesión). Caduca a los **30 minutos de inactividad** (cada petición lo renueva). El estado está en un archivo dentro del contenedor `php`: recrearlo cierra todas las sesiones.
 - **Cerrar sesión:** botón en el encabezado, es un POST (`logout.php`). Las páginas protegidas llevan `Cache-Control: no-store`.
-- **Límites:** sin límite de intentos fallidos (el diseño está en `plan.md`), sin cambio de contraseña, sin token CSRF (mejora 6), y sin HTTPS la contraseña viaja en claro. El rol de `users` no concede permisos. `status.php` y Adminer no pasan por este login.
+- **Límites:** sin límite de intentos fallidos (el diseño está en `plan.md`), sin recuperación de contraseña (solo la cambia otro administrador al editar), y sin HTTPS la contraseña viaja en claro. Solo el rol `admin` (con contraseña) concede acceso; los demás roles son etiquetas. `status.php` y Adminer no pasan por este login.
 - **Contraseñas:** de 10 a 72 bytes (bcrypt solo lee 72 y se corta en un byte NUL: se rechazan en vez de truncarlas).
 
 ## Tokens CSRF
@@ -428,7 +432,7 @@ Códigos que devuelve la aplicación (regla: si el envío no se completó, nunca
 
 **`Failed opening required ...` y la página responde 200.** Linux distingue mayúsculas y nombres exactos de archivo; con `display_errors` activo PHP muestra el fallo con estado 200.
 
-**No puedo entrar (login).** Una instalación nueva trae `admin@example.com` (ver «Usuarios y claves»). En una BD que ya existía crea uno con `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com`. Recrear el contenedor `php` cierra todas las sesiones (están en `/tmp` del contenedor).
+**No puedo entrar (login).** Solo entra un usuario con rol *Administrador*, activo y con contraseña. Una instalación nueva trae `admin@example.com` (ver «Usuarios y claves»); si nadie puede entrar, crea uno con `bin/as-migrator php scripts/create-admin.php correo@ejemplo.com`. Recrear el contenedor `php` cierra todas las sesiones (están en `/tmp` del contenedor).
 
 **«Token de seguridad no válido» (403) al enviar un formulario.** La sesión caducó (30 minutos sin actividad) o se abrió el formulario antes de iniciar sesión de nuevo: recarga la página e inténtalo otra vez.
 

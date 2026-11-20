@@ -35,6 +35,7 @@ final class User
         public readonly string $role,
         public readonly bool $active,
         public readonly string $createdAt,
+        public readonly bool $hasAccess = false,
     ) {
     }
 
@@ -56,6 +57,7 @@ final class User
             (string) $row['role'],
             (bool) ($row['active'] ?? true),
             (string) ($row['created_at'] ?? ''),
+            (bool) ($row['has_access'] ?? false),
         );
     }
 
@@ -124,6 +126,7 @@ final class User
             $this->document,
             $this->birthDate,
             $this->role,
+            $this->hasAccess,
         ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 
         return hash('sha256', $content === false ? '' : $content);

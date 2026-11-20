@@ -60,7 +60,7 @@ function asset(string $path): string
  */
 function icon(string $name): string
 {
-    static $known = ['search', 'plus', 'pencil', 'trash', 'undo', 'logout', 'x', 'chevron-left', 'chevron-right', 'check-circle', 'info', 'alert', 'archive', 'users', 'arrow-left', 'chevron-down'];
+    static $known = ['search', 'plus', 'pencil', 'trash', 'undo', 'logout', 'x', 'chevron-left', 'chevron-right', 'check-circle', 'info', 'alert', 'archive', 'users', 'arrow-left', 'chevron-down', 'key'];
 
     if (!in_array($name, $known, true)) {
         throw new InvalidArgumentException("Icono desconocido: $name");

@@ -141,7 +141,7 @@ final class UserSearch
     {
         [$where, $params] = self::where($term, $active);
 
-        $sql = 'SELECT id, name, last_name, email, phone, document, birth_date, role, created_at FROM users' . $where
+        $sql = 'SELECT id, name, last_name, email, phone, document, birth_date, role, (password_hash IS NOT NULL) AS has_access, created_at FROM users' . $where
             . ' ORDER BY id DESC LIMIT :limit OFFSET :offset';
 
         return [$sql, $params + [':limit' => max(1, $limit), ':offset' => max(0, $offset)]];

@@ -242,7 +242,8 @@ strong { font-weight: 650; }
 /* Formularios */
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field__label { font-size: 0.9rem; font-weight: 600; }
-.field__hint { font-size: 0.85rem; color: var(--muted); }
+.field__hint { margin: 0; font-size: 0.85rem; color: var(--muted); }
+.field[hidden] { display: none; }
 .field__error { display: flex; gap: 6px; align-items: flex-start; font-size: 0.875rem; color: var(--danger); }
 .field__error .icon { margin-top: 1px; width: 1.1em; height: 1.1em; }
 
@@ -296,6 +297,10 @@ strong { font-weight: 650; }
 }
 .tag--editor { background: var(--info-soft); color: var(--info); border-color: var(--info-line); }
 .tag--admin { background: var(--primary-soft); color: var(--primary); border-color: var(--primary-line); }
+
+/* Marca de «puede iniciar sesión» junto al rol */
+.access { display: inline-grid; place-items: center; margin-left: 8px; width: 24px; height: 24px; vertical-align: middle; color: var(--primary); background: var(--primary-soft); border-radius: 46% 54% 52% 48% / 54% 46% 54% 46%; }
+.access .icon { width: 14px; height: 14px; }
 
 /* Tabla */
 .table-wrap { overflow: hidden; }

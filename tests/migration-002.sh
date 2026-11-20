@@ -22,7 +22,7 @@ cleanup
 printf 'CREATE DATABASE migration_old CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE migration_new CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n' | root >/dev/null
 root migration_new < database/01-schema.sql >/dev/null
 root migration_old < database/01-schema.sql >/dev/null
-printf 'ALTER TABLE users DROP KEY idx_active_id, DROP COLUMN active;\n' | root migration_old >/dev/null; [ $? = 0 ]; ok "se prepara el esquema anterior (sin active ni su índice)" $?
+printf 'ALTER TABLE users DROP KEY idx_active_id, DROP COLUMN active, DROP COLUMN password_hash;\n' | root migration_old >/dev/null; [ $? = 0 ]; ok "se prepara el esquema anterior (sin active, su índice ni password_hash)" $?
 root migration_old <<'SQL' >/dev/null
 SET NAMES utf8mb4;
 INSERT INTO users (name, last_name, email, phone, document, birth_date, role, created_at) VALUES
@@ -39,6 +39,8 @@ root migration_old < database/migrations/002-active.sql >/dev/null; [ $? = 0 ]; 
 [ "$(printf 'SELECT COUNT(*) FROM users WHERE active = 1;\n' | root migration_old)" = 3 ]; ok "los 3 quedan activos (siguen visibles)" $?
 
 echo "== La BD migrada y la instalación nueva son idénticas"
+# En la historia real la 004 (password_hash) llega DESPUÉS de la 002: se aplica su ALTER para comparar el esquema final.
+printf 'ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) DEFAULT NULL AFTER role;\n' | root migration_old >/dev/null
 STRUCT="SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, IFNULL(COLUMN_DEFAULT,'NULL'), IFNULL(COLLATION_NAME,'-') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='users' ORDER BY ORDINAL_POSITION;"
 IDX="SELECT INDEX_NAME, SEQ_IN_INDEX, COLUMN_NAME, NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='users' ORDER BY INDEX_NAME, SEQ_IN_INDEX;"
 A=$(printf "$STRUCT\n" migration_old | root); B=$(printf "$STRUCT\n" migration_new | root)

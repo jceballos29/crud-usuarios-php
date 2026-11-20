@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Repository;
 
+use App\Auth\AdminAuth;
 use App\Domain\User;
 use App\Exceptions\DuplicateUserException;
 use App\Search\UserSearch;
@@ -21,7 +22,8 @@ use PDOStatement;
  */
 final class UserRepository
 {
-    private const USER_COLUMNS = 'id, name, last_name, email, phone, document, birth_date, role, active, created_at';
+    // has_access: ¿puede iniciar sesión? Solo se lee si hay contraseña; el hash NUNCA sale de la BD hacia las pantallas.
+    private const USER_COLUMNS = 'id, name, last_name, email, phone, document, birth_date, role, (password_hash IS NOT NULL) AS has_access, active, created_at';
 
     public function __construct(private readonly PDO $pdo)
     {
@@ -68,22 +70,31 @@ final class UserRepository
     /**
      * Crea un usuario.
      *
+     * Si el rol es «admin» y viene una contraseña, se guarda su HASH y esa persona podrá iniciar sesión; con
+     * cualquier otro rol la contraseña se ignora (no se guarda nada).
+     *
      * @param array<string, string> $data Datos ya validados (UserValidator::read() y validate()).
      * @throws DuplicateUserException Si el correo o el documento ya los tiene otro usuario.
      */
     public function create(array $data): void
     {
-        $sql = 'INSERT INTO users (name, last_name, email, phone, document, birth_date, role) VALUES (:name, :last_name, :email, :phone, :document, :birth_date, :role)';
+        $access = ($data['role'] ?? '') === 'admin' && ($data['password'] ?? '') !== '';
+        $sql = $access
+            ? 'INSERT INTO users (name, last_name, email, phone, document, birth_date, role, password_hash) VALUES (:name, :last_name, :email, :phone, :document, :birth_date, :role, :password_hash)'
+            : 'INSERT INTO users (name, last_name, email, phone, document, birth_date, role) VALUES (:name, :last_name, :email, :phone, :document, :birth_date, :role)';
 
         try {
-            $this->run($sql, self::params($data));
+            $this->run($sql, self::params($data) + ($access ? [':password_hash' => AdminAuth::hash($data['password'])] : []));
         } catch (PDOException $error) {
             throw $this->asDuplicate($error, $data) ?? $error;
         }
     }
 
     /**
-     * Actualiza un usuario VISIBLE.
+     * Actualiza un usuario VISIBLE. Sobre el ACCESO (users.password_hash):
+     *  - rol distinto de «admin»: se BORRA el hash (quien deja de ser administrador deja de poder entrar);
+     *  - rol «admin» con contraseña nueva: se guarda su hash;
+     *  - rol «admin» sin contraseña nueva: el hash que había se conserva.
      *
      * @param array<string, string> $data Datos ya validados.
      * @return bool false si el usuario ya no existe (o está eliminado): rowCount() cuenta las filas que
@@ -93,10 +104,19 @@ final class UserRepository
      */
     public function update(int $id, array $data): bool
     {
-        $sql = 'UPDATE users SET name = :name, last_name = :last_name, email = :email, phone = :phone, document = :document, birth_date = :birth_date, role = :role WHERE id = :id AND active = 1';
+        $isAdmin = ($data['role'] ?? '') === 'admin';
+        $newPassword = $isAdmin && ($data['password'] ?? '') !== '';
+        $access = match (true) {
+            !$isAdmin => ', password_hash = NULL',
+            $newPassword => ', password_hash = :password_hash',
+            default => '',
+        };
+        $sql = 'UPDATE users SET name = :name, last_name = :last_name, email = :email, phone = :phone, document = :document, birth_date = :birth_date, role = :role' . $access . ' WHERE id = :id AND active = 1';
 
         try {
-            return $this->run($sql, self::params($data) + [':id' => $id])->rowCount() > 0;
+            $params = self::params($data) + [':id' => $id] + ($newPassword ? [':password_hash' => AdminAuth::hash($data['password'])] : []);
+
+            return $this->run($sql, $params)->rowCount() > 0;
         } catch (PDOException $error) {
             throw $this->asDuplicate($error, $data) ?? $error;
         }

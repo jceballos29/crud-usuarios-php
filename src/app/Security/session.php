@@ -142,6 +142,16 @@ function log_in_admin(array $admin): void
     $_SESSION = ['admin_id' => $admin['id'], 'admin_email' => $admin['email'], 'last_seen' => time()];
 }
 
+/** El administrador cambió su propio correo: la sesión (y el encabezado) enseñan el nuevo. */
+function refresh_admin_session_email(string $email): void
+{
+    start_app_session();
+
+    if (isset($_SESSION['admin_id'])) {
+        $_SESSION['admin_email'] = $email;
+    }
+}
+
 /** Cierra la sesión: vacía los datos, borra la cookie del navegador y destruye el archivo del servidor. */
 function log_out_admin(): void
 {

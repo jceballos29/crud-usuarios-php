@@ -121,7 +121,7 @@ foreach (['', 'localhost:8080', 'ftp://x', 'null'] as $badConfig) {
 section('UserValidator::fields(): definición de los campos del formulario');
 same('el teléfono usa type="tel" (teclado numérico en el móvil)', 'tel', v()->fields()['phone']['type']);
 same('el correo usa type="email"', 'email', v()->fields()['email']['type']);
-same('los máximos coinciden con las columnas', [100, 100, 254, 20, 20, 10, 0], array_column(v()->fields(), 'max'));
+same('los máximos coinciden con las columnas', [100, 100, 254, 20, 20, 10, 0, 72, 72], array_column(v()->fields(), 'max'));
 
 section('User::rowToken(): huella de la fila para detectar ediciones simultáneas');
 $row = ['name' => 'Ana', 'last_name' => 'Ruiz', 'email' => 'a@b.co', 'phone' => null, 'document' => null, 'birth_date' => null, 'role' => 'user'];
@@ -142,7 +142,7 @@ $data = v()->read(['name' => '  Ana  ', 'last_name' => 'Ruiz', 'email' => '  ANA
 same('trim del nombre', 'Ana', $data['name']);
 same('el correo se pasa a minúsculas', 'ana@ejemplo.com', $data['email']);
 same('trim del teléfono', '300', $data['phone']);
-same('solo quedan las claves definidas', ['name', 'last_name', 'email', 'phone', 'document', 'birth_date', 'role'], array_keys($data));
+same('solo quedan las claves definidas', ['name', 'last_name', 'email', 'phone', 'document', 'birth_date', 'role', 'password', 'password_confirm'], array_keys($data));
 $data = v()->read(['name' => ['x'], 'last_name' => null, 'email' => 5]);
 same('un arreglo (name[]=x) se trata como vacío', '', $data['name']);
 same('null se trata como vacío', '', $data['last_name']);
@@ -262,7 +262,7 @@ same('OFFSET negativo se corrige a 0', 0, $negParams[':offset']);
 same('LIMIT negativo se corrige a 1', 1, $negParams2[':limit']);
 [$listSql] = UserSearch::listQuery('x', 10, 0);
 [$countSqlX] = UserSearch::countQuery('x');
-same('el listado y el recuento comparten exactamente el mismo WHERE', substr($countSqlX, strlen('SELECT COUNT(*) FROM users')), substr($listSql, strlen('SELECT id, name, last_name, email, phone, document, birth_date, role, created_at FROM users'), strpos($listSql, ' ORDER BY') - strlen('SELECT id, name, last_name, email, phone, document, birth_date, role, created_at FROM users')));
+same('el listado y el recuento comparten exactamente el mismo WHERE', substr($countSqlX, strlen('SELECT COUNT(*) FROM users')), substr($listSql, strlen('SELECT id, name, last_name, email, phone, document, birth_date, role, (password_hash IS NOT NULL) AS has_access, created_at FROM users'), strpos($listSql, ' ORDER BY') - strlen('SELECT id, name, last_name, email, phone, document, birth_date, role, (password_hash IS NOT NULL) AS has_access, created_at FROM users')));
 $hostile = "'; DROP TABLE users; --";
 [$hostileSql, $hostileParams] = UserSearch::listQuery($hostile, 10, 0);
 same('un texto hostil no aparece en el SQL', false, str_contains($hostileSql, 'DROP') || str_contains($hostileSql, '--'));
@@ -383,12 +383,12 @@ same('...y los demás campos nuevos vacíos', ['', ''], [v()->emptyData()['docum
 
 section('Rol: lista blanca estricta');
 foreach (array_keys(User::roles()) as $role) {
-    same("«{$role}» es válido", [], validWith(['role' => $role]));
+    same("«{$role}» es válido", [], validWith(['role' => $role] + ($role === 'admin' ? ['password' => 'una-clave-larga', 'password_confirm' => 'una-clave-larga'] : [])));
 }
 foreach (['superadmin', 'ADMIN', 'Admin', '', '0', '1', 'user,admin', "ad\0min", 'usuario', 'null'] as $role) {
     same('rol ' . var_export($role, true) . ' se rechaza', ['role' => 'Selecciona un rol de la lista.'], validWith(['role' => $role]));
 }
-same('con espacios alrededor se acepta (trim, como todos los campos)', [], validWith(['role' => ' admin ']));
+same('con espacios alrededor se acepta (trim, como todos los campos)', [], validWith(['role' => ' editor ']));
 same('role[] (un arreglo) se rechaza', ['role' => 'Selecciona un rol de la lista.'], v()->validate(v()->read(['name' => 'Ana', 'last_name' => 'P', 'email' => 'a@b.co', 'role' => ['admin']])));
 same('los roles son los del ENUM (lista fija y en orden)', ['user', 'editor', 'admin'], array_keys(User::roles()));
 same('el rol por defecto es uno de ellos', true, array_key_exists(User::ROLE_DEFAULT, User::roles()));
@@ -520,6 +520,56 @@ same('un texto cualquiera sin sesión ni cookie tampoco (no hay con qué compara
 same('el nombre del campo', 'csrf_token', CSRF_FIELD);
 same('el token son 32 bytes al azar: 64 caracteres hexadecimales', [32, 64], [CSRF_TOKEN_BYTES, CSRF_TOKEN_BYTES * 2]);
 same('hash_equals no es === : compara en tiempo constante y exige texto en ambos lados', [true, false], [hash_equals('abc', 'abc'), hash_equals('abc', 'abd')]);
+
+section('Acceso de administradores: contraseña en el formulario de usuario');
+$admin = static fn(array $extra = []): array => $extra + ['role' => 'admin', 'password' => 'una-clave-larga', 'password_confirm' => 'una-clave-larga'];
+same('un administrador con contraseña válida y repetida', [], validWith($admin()));
+same('al CREAR, un administrador sin contraseña: error', ['password' => 'Escribe una contraseña para que pueda iniciar sesión.'], validWith($admin(['password' => '', 'password_confirm' => ''])));
+same('...igual si solo escribe la repetición', ['password' => 'Escribe una contraseña para que pueda iniciar sesión.'], validWith($admin(['password' => '', 'password_confirm' => 'una-clave-larga'])));
+same('al EDITAR a quien ya es administrador, vacía es válido (conserva la actual)', [], (function () use ($admin): array {
+    $data = v()->read($admin(['name' => 'Ana', 'last_name' => 'P', 'email' => 'a@b.co', 'password' => '', 'password_confirm' => '']));
+
+    return v()->validate($data, false);
+})());
+same('...pero si escribe una nueva, se valida igual (corta: error)', ['password' => 'La contraseña debe tener al menos 10 caracteres.'], (function () use ($admin): array {
+    $data = v()->read($admin(['name' => 'Ana', 'last_name' => 'P', 'email' => 'a@b.co', 'password' => 'corta', 'password_confirm' => 'corta']));
+
+    return v()->validate($data, false);
+})());
+same('contraseña corta (9 caracteres)', ['password' => 'La contraseña debe tener al menos 10 caracteres.'], validWith($admin(['password' => '123456789', 'password_confirm' => '123456789'])));
+same('de 73 bytes: demasiado larga para bcrypt', ['password' => 'La contraseña no puede superar los 72 bytes (límite de bcrypt).'], validWith($admin(['password' => str_repeat('x', 73), 'password_confirm' => str_repeat('x', 73)])));
+same('con un byte NUL', true, isset(validWith($admin(['password' => "clave-larga\0x", 'password_confirm' => "clave-larga\0x"]))['password']));
+same('no coinciden: el error va en la repetición', ['password_confirm' => 'Las contraseñas no coinciden.'], validWith($admin(['password_confirm' => 'otra-clave-larga'])));
+same('la repetición distingue mayúsculas', ['password_confirm' => 'Las contraseñas no coinciden.'], validWith($admin(['password_confirm' => 'UNA-CLAVE-LARGA'])));
+same('sin repetición', ['password_confirm' => 'Las contraseñas no coinciden.'], validWith($admin(['password_confirm' => ''])));
+same('los espacios cuentan (no se recortan): «          » son 10 caracteres válidos', [], validWith($admin(['password' => '          ', 'password_confirm' => '          '])));
+same('...y uno de más en la repetición no coincide', ['password_confirm' => 'Las contraseñas no coinciden.'], validWith($admin(['password' => 'una-clave-larga', 'password_confirm' => 'una-clave-larga '])));
+foreach (['editor', 'user'] as $role) {
+    same("con el rol «{$role}» la contraseña se ignora (no hay errores aunque venga corta o distinta)", [], validWith(['role' => $role, 'password' => 'x', 'password_confirm' => 'y']));
+    same("...y con «{$role}» tampoco se exige", [], validWith(['role' => $role, 'password' => '', 'password_confirm' => '']));
+}
+same('password como arreglo se trata como vacío (y falla como obligatoria)', ['password' => 'Escribe una contraseña para que pueda iniciar sesión.'], validWith($admin(['password' => ['x'], 'password_confirm' => ['x']])));
+same('read() no recorta la contraseña ni la normaliza', ['  Clave Larga  ', '  Clave Larga  '], (function (): array {
+    $data = v()->read(['password' => '  Clave Larga  ', 'password_confirm' => '  Clave Larga  ']);
+
+    return [$data['password'], $data['password_confirm']];
+})());
+same('...pero sí recorta los demás campos', 'Ana', v()->read(['name' => '  Ana  '])['name']);
+same('los campos de contraseña solo se muestran con el rol admin (data-gate)', ['admin', 'admin'], [v()->fields()['password']['gate'], v()->fields()['password_confirm']['gate']]);
+same('AdminAuth::passwordError() es la misma regla que la de la consola', [null, 'La contraseña debe tener al menos 10 caracteres.'], [AdminAuth::passwordError('una-clave-larga'), AdminAuth::passwordError('corta')]);
+same('AdminAuth::hash() es un bcrypt distinto cada vez (salt) que verifica', [true, true, false], (function (): array {
+    $a = AdminAuth::hash('una-clave-larga');
+    $b = AdminAuth::hash('una-clave-larga');
+
+    return [$a !== $b && str_starts_with($a, '$2y$'), password_verify('una-clave-larga', $a), password_verify('otra', $a)];
+})());
+same('User::hasAccess: por defecto no, y cuenta en la huella de edición', [false, true], (function (): array {
+    $row = ['id' => 1, 'name' => 'A', 'last_name' => 'B', 'email' => 'a@b.co', 'role' => 'admin', 'active' => 1, 'created_at' => ''];
+    $without = User::fromRow($row);
+    $with = User::fromRow($row + ['has_access' => 1]);
+
+    return [$without->hasAccess, $without->rowToken() !== $with->rowToken()];
+})());
 
 section('Interfaz: User::initials(), User::tone(), asset() e icon()');
 $person = static fn(string $name, string $last, string $email = 'a@b.co'): User => User::fromRow(['id' => 1, 'name' => $name, 'last_name' => $last, 'email' => $email, 'role' => 'user', 'active' => 1, 'created_at' => '']);

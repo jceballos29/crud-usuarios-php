@@ -16,10 +16,11 @@
 #
 #   DB_USERNAME            Usuario de la APLICACIÓN (lo usa PHP en cada petición). Solo lo que la aplicación hace
 #                          de verdad:
-#                            users   SELECT, INSERT, UPDATE        (eliminar es un UPDATE: borrado lógico, M4)
-#                            admins  SELECT, UPDATE(password_hash) (iniciar sesión y recalcular el hash)
-#                          NO puede: DELETE, crear administradores, DROP/ALTER/TRUNCATE/CREATE, tablas
-#                          temporales, ni tocar ninguna otra base ni los usuarios de MySQL.
+#                            users   SELECT, INSERT, UPDATE   (eliminar es un UPDATE: borrado lógico, M4; el acceso de un
+#                                    administrador es users.role + users.password_hash, desde la migración 004)
+#                          NO puede: DELETE, DROP/ALTER/TRUNCATE/CREATE, tablas temporales, ni tocar ninguna otra
+#                          base ni los usuarios de MySQL. (Ojo: como crea y edita administradores desde la propia
+#                          pantalla de usuarios, SÍ puede escribir `role` y `password_hash`: es lo que pide esa función.)
 #
 #   DB_MIGRATION_USERNAME  Usuario de MIGRACIONES y tareas manuales (migraciones, create-admin.php, seed-demo.php,
 #                          las pruebas). Todos los privilegios sobre la base de la aplicación, y nada más (ni
@@ -65,8 +66,6 @@ ALTER USER '$DB_USERNAME'@'%' IDENTIFIED BY '$APP_PW';
 -- Se parte de cero (también sirve para un usuario que ya existía con ALL): se revoca todo y se concede lo mínimo.
 REVOKE ALL PRIVILEGES, GRANT OPTION FROM '$DB_USERNAME'@'%';
 GRANT SELECT, INSERT, UPDATE ON \`$MYSQL_DATABASE\`.\`users\` TO '$DB_USERNAME'@'%';
-GRANT SELECT ON \`$MYSQL_DATABASE\`.\`admins\` TO '$DB_USERNAME'@'%';
-GRANT UPDATE (password_hash) ON \`$MYSQL_DATABASE\`.\`admins\` TO '$DB_USERNAME'@'%';
 SQL
     if [ -n "$MIGRATION_PASSWORD" ]; then
         cat <<SQL

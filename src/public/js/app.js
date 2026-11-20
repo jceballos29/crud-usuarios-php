@@ -5,7 +5,9 @@
 // 1. Confirmación: un formulario con data-confirm="mensaje" pide confirmación en un <dialog> propio antes de enviarse
 //    (data-confirm-note: texto de apoyo; data-confirm-action: texto del botón que confirma). Sin <dialog> usa confirm().
 // 2. Avisos: un botón con data-dismiss cierra su aviso (.notice).
-// 3. Envío: tras enviar un formulario se desactivan sus botones, para que un doble clic no lo envíe dos veces.
+// 3. Campos por rol: un campo con data-gate="admin" solo se muestra si el <select name="role"> vale "admin" (la
+//    contraseña de quien podrá iniciar sesión). Es comodidad: el servidor decide qué cuenta.
+// 4. Envío: tras enviar un formulario se desactivan sus botones, para que un doble clic no lo envíe dos veces.
 (() => {
     'use strict';
 
@@ -109,7 +111,17 @@
         }
     });
 
-    // --- 3. Un solo envío ------------------------------------------------------------------------------------------
+    // --- 3. Campos por rol ----------------------------------------------------------------------------------------
+    const roleSelect = document.querySelector('select[name="role"]');
+
+    if (roleSelect) {
+        const gated = document.querySelectorAll('[data-gate]');
+        const sync = () => gated.forEach((field) => { field.hidden = field.dataset.gate !== roleSelect.value; });
+        roleSelect.addEventListener('change', sync);
+        sync();
+    }
+
+    // --- 4. Un solo envío ------------------------------------------------------------------------------------------
     document.addEventListener('submit', (event) => {
         const form = event.target;
 

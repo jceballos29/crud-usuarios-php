@@ -30,7 +30,6 @@ MIG_USER=$(docker compose exec -T db sh -c 'printf %s "$DB_MIGRATION_USERNAME"')
 # (se excluyen las filas «priv-» que crean estas mismas pruebas)
 REALUSERS="SELECT COUNT(*) FROM users WHERE email NOT LIKE 'priv-%';"
 USERS_BEFORE=$(printf '%s\n' "$REALUSERS" | mig)
-ADMINS_BEFORE=$(printf 'SELECT COUNT(*) FROM admins;\n' | mig)
 cleanup() { printf "DELETE FROM users WHERE email LIKE 'priv-%%@example.com'; DROP TABLE IF EXISTS m7_scratch;\n" | mig >/dev/null 2>&1; printf "DROP USER IF EXISTS 'm7_tmp'@'%%';\n" | root >/dev/null 2>&1; }
 trap cleanup EXIT
 cleanup
@@ -38,30 +37,26 @@ cleanup
 section "El usuario de la aplicación ($APP_USER): sus permisos, exactamente"
 EXPECTED=$(printf '%s\n' \
   "GRANT USAGE ON *.* TO \`$APP_USER\`@\`%\`" \
-  "GRANT SELECT, UPDATE (\`password_hash\`) ON \`crud_usuarios\`.\`admins\` TO \`$APP_USER\`@\`%\`" \
   "GRANT SELECT, INSERT, UPDATE ON \`crud_usuarios\`.\`users\` TO \`$APP_USER\`@\`%\`" | sort)
 ACTUAL=$(printf 'SHOW GRANTS FOR "%s"@"%%";\n' "$APP_USER" | root | sort)
-[ "$EXPECTED" = "$ACTUAL" ]; ok "SHOW GRANTS es exactamente: users SELECT/INSERT/UPDATE; admins SELECT y UPDATE(password_hash); nada más" $?
+[ "$EXPECTED" = "$ACTUAL" ]; ok "SHOW GRANTS es exactamente: users SELECT/INSERT/UPDATE; nada más (desde la migración 004 no hay tabla admins)" $?
 [ "$(printf 'SHOW GRANTS FOR "%s"@"%%";\n' "$APP_USER" | root | grep -ciE 'ALL PRIVILEGES|WITH GRANT OPTION|DELETE|DROP|ALTER|CREATE')" = 0 ]; ok "no tiene ALL, GRANT OPTION, DELETE, DROP, ALTER ni CREATE" $?
 
 section "Lo que la aplicación SÍ necesita (si falla alguna, la aplicación se rompería)"
 works_app 'SELECT COUNT(*) FROM users;'; ok "SELECT en users" $?
-works_app 'SELECT id, email, password_hash FROM admins LIMIT 1;'; ok "SELECT en admins (iniciar sesión)" $?
+works_app "SELECT id, email, password_hash FROM users WHERE role = 'admin' AND active = 1 AND password_hash IS NOT NULL LIMIT 1;"; ok "SELECT de quien puede iniciar sesión (users.password_hash)" $?
 works_app "INSERT INTO users (name, last_name, email) VALUES ('Priv', 'Prueba', 'priv-1@example.com');"; ok "INSERT en users (crear)" $?
 works_app "UPDATE users SET active = 0 WHERE email = 'priv-1@example.com';"; ok "UPDATE en users (editar, eliminar lógicamente y restaurar)" $?
-works_app 'UPDATE admins SET password_hash = password_hash WHERE id = 0;'; ok "UPDATE de admins.password_hash (recalcular el hash al entrar)" $?
+works_app 'UPDATE users SET password_hash = password_hash WHERE id = 0;'; ok "UPDATE de users.password_hash (recalcular el hash al entrar, o cambiar la contraseña desde la pantalla de usuarios)" $?
+works_app "INSERT INTO users (name, last_name, email, role, password_hash) VALUES ('Priv', 'Admin', 'priv-2@example.com', 'admin', 'x');"; ok "INSERT de un usuario con rol admin y hash (registrar administradores desde la pantalla: la aplicación PUEDE dar acceso, es lo que pide esa función)" $?
 works_app 'SELECT VERSION();'; ok "SELECT VERSION() (status.php)" $?
 
 section "Lo que la aplicación NO puede hacer (prueba negativa del plan)"
 denied_app 'DROP TABLE users;'; ok "DROP TABLE users" $?
-denied_app 'DROP TABLE admins;'; ok "DROP TABLE admins" $?
+denied_app 'SELECT 1 FROM admins LIMIT 1;'; ok "la tabla admins ya no existe (no hay a dónde mirar)" $?
 denied_app 'ALTER TABLE users ADD COLUMN zz INT;'; ok "ALTER TABLE users" $?
 denied_app 'TRUNCATE TABLE users;'; ok "TRUNCATE TABLE users" $?
 denied_app 'DELETE FROM users WHERE id = 0;'; ok "DELETE FROM users (la aplicación elimina con UPDATE: borrado lógico)" $?
-denied_app 'DELETE FROM admins WHERE id = 0;'; ok "DELETE FROM admins" $?
-denied_app "INSERT INTO admins (email, password_hash) VALUES ('x@example.com', 'x');"; ok "INSERT INTO admins (aunque alguien ejecutara SQL desde la aplicación, no podría darse de alta como administrador)" $?
-denied_app "UPDATE admins SET email = 'x@example.com' WHERE id = 0;"; ok "UPDATE admins SET email (solo se puede cambiar password_hash)" $?
-denied_app "UPDATE admins SET password_hash = 'x', email = 'x@example.com' WHERE id = 0;"; ok "...ni mezclando password_hash con otra columna" $?
 denied_app 'CREATE TABLE zz (id INT);'; ok "CREATE TABLE" $?
 denied_app 'CREATE TEMPORARY TABLE zz (id INT);'; ok "CREATE TEMPORARY TABLE" $?
 denied_app 'CREATE INDEX zz ON users (name);'; ok "CREATE INDEX" $?
@@ -79,7 +74,7 @@ denied_app 'SHUTDOWN;'; ok "SHUTDOWN" $?
 denied_app 'USE mysql;'; ok "USE mysql" $?
 denied_app 'SELECT * FROM sys.version;'; ok "leer la base sys" $?
 [ "$(printf 'SHOW DATABASES;\n' | app | sort | tr '\n' ' ')" = "crud_usuarios information_schema performance_schema " ] || [ "$(printf 'SHOW DATABASES;\n' | app | sort | tr '\n' ' ')" = "crud_usuarios information_schema " ]; ok "SHOW DATABASES solo enseña crud_usuarios (y las de información)" $?
-[ "$USERS_BEFORE" = "$(printf '%s\n' "$REALUSERS" | mig)" ] && [ "$ADMINS_BEFORE" = "$(printf 'SELECT COUNT(*) FROM admins;\n' | mig)" ]; ok "tras todos los intentos las tablas siguen ahí con los mismos datos" $?
+[ "$USERS_BEFORE" = "$(printf '%s\n' "$REALUSERS" | mig)" ]; ok "tras todos los intentos las tablas siguen ahí con los mismos datos" $?
 
 section "El usuario de migraciones ($MIG_USER)"
 GRANTS=$(printf 'SHOW GRANTS FOR "%s"@"%%";\n' "$MIG_USER" | root)
@@ -116,7 +111,7 @@ printf "DROP USER 'm7_tmp'@'%%';\n" | root >/dev/null
 docker compose exec -T -e "DB_USERNAME=x'; DROP DATABASE crud_usuarios; --" db bash /docker-entrypoint-initdb.d/03-users.sh >/dev/null 2>&1; [ $? != 0 ]; ok "un nombre de usuario con comillas se rechaza (no se inyecta SQL por el nombre)" $?
 docker compose exec -T -e DB_USERNAME=root db bash /docker-entrypoint-initdb.d/03-users.sh >/dev/null 2>&1; [ $? != 0 ]; ok "DB_USERNAME=root se rechaza" $?
 docker compose exec -T -e "DB_USERNAME=$MIG_USER" db bash /docker-entrypoint-initdb.d/03-users.sh >/dev/null 2>&1; [ $? != 0 ]; ok "el mismo usuario para la aplicación y las migraciones se rechaza" $?
-[ "$USERS_BEFORE" = "$(printf '%s\n' "$REALUSERS" | mig)" ] && [ "$ADMINS_BEFORE" = "$(printf 'SELECT COUNT(*) FROM admins;\n' | mig)" ]; ok "los datos siguen intactos (users y admins)" $?
+[ "$USERS_BEFORE" = "$(printf '%s\n' "$REALUSERS" | mig)" ]; ok "los datos siguen intactos" $?
 
 echo; echo "Resultado: $PASS correctas, $FAIL fallidas"
 [ "$FAIL" = 0 ]

@@ -108,6 +108,7 @@ $fixedOutputs = [
     "(string) \$optionValue === \$data[\$fieldName] ? ' selected' : ''",
     "extension_loaded(\$extension) ? '✔' : '✘'", "extension_loaded(\$extension) ? '' : '(falta)'",
     "\$database['ok'] ? 'success' : 'danger'",
+    "isset(\$definition['gate']) ? ' data-gate=\"' . escape(\$definition['gate']) . '\"' : ''",
     "\$user->tone()",
     "\$fieldName === 'email' ? ' field--wide' : ''",
     "\$user->phone === null ? ' is-empty is-muted' : ''",

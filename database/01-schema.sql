@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS users (
     birth_date DATE DEFAULT NULL,
     -- Los roles validos tambien estan en User::roles() (src/app/Domain/User.php); una prueba los compara.
     role ENUM('user', 'editor', 'admin') NOT NULL DEFAULT 'user',
+    -- Extra de acceso (misma definicion que database/migrations/004-user-passwords.sql: mantener ambos).
+    -- Hash bcrypt de la contrasena; NULL = no puede iniciar sesion. Solo entra quien tiene rol admin, esta activo y
+    -- tiene contrasena. (Hasta la migracion 004 los administradores vivian en otra tabla, admins.)
+    password_hash VARCHAR(255) DEFAULT NULL,
     -- Mejora 4 (misma definicion que database/migrations/002-active.sql: mantener ambos).
     -- Borrado logico: 1 = visible, 0 = eliminado (la fila se conserva).
     active TINYINT(1) NOT NULL DEFAULT 1,
@@ -21,16 +25,4 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE KEY unique_email (email),
     UNIQUE KEY unique_document (document),
     KEY idx_active_id (active, id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Mejora 5 (misma definicion que database/migrations/003-admins.sql: mantener ambos).
--- Administradores que inician sesion. Aparte de `users`. Se crean con src/scripts/create-admin.php.
-CREATE TABLE IF NOT EXISTS admins (
-    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-    email VARCHAR(254) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    PRIMARY KEY (id),
-    UNIQUE KEY unique_admin_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

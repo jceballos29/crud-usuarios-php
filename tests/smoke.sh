@@ -30,7 +30,7 @@ FAIL=0
 # sql() consulta la BD como el usuario de MIGRACIONES (M7): la aplicación ya no puede borrar filas ni cambiar el esquema,
 # y esta prueba necesita preparar y limpiar datos (DELETE) y cambiar tablas (RENAME) por su cuenta.
 sql() { printf '%s\n' "$1" | docker compose exec -T db sh -c 'mysql -N --default-character-set=utf8mb4 -u"$DB_MIGRATION_USERNAME" -p"$DB_MIGRATION_PASSWORD" "$MYSQL_DATABASE"' 2>/dev/null; }
-cleanup() { sql "RENAME TABLE users_tmp TO users;" >/dev/null 2>&1; sql "DELETE FROM users WHERE email LIKE 'smoke-%@example.com';" >/dev/null 2>&1; sql "DELETE FROM admins WHERE email LIKE 'smoke-%@example.com';" >/dev/null 2>&1; rm -rf "$TMP"; }
+cleanup() { sql "RENAME TABLE users_tmp TO users;" >/dev/null 2>&1; sql "DELETE FROM users WHERE email LIKE 'smoke-%@example.com';" >/dev/null 2>&1; rm -rf "$TMP"; }
 trap cleanup EXIT
 
 section() { printf '\n== %s\n' "$1"; }
@@ -78,15 +78,14 @@ if [ "$(command curl -s -o /dev/null -w '%{http_code}' "$BASE/login.php")" != 20
 fi
 sql "SELECT 1;" >/dev/null || { echo "No se puede consultar la base de datos con docker compose exec." >&2; exit 2; }
 sql "DELETE FROM users WHERE email LIKE 'smoke-%@example.com';" >/dev/null
-sql "DELETE FROM admins WHERE email LIKE 'smoke-%@example.com';" >/dev/null
+USERS_BEFORE=$(sql 'SELECT COUNT(*) FROM users;')   # antes de crear al administrador de prueba (que también es un usuario)
 # Un administrador de prueba con una contraseña al azar (solo existe durante la prueba), por la entrada estándar.
 ADMIN_PW="smoke-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 printf '%s\n' "$ADMIN_PW" | bin/as-migrator php scripts/create-admin.php smoke-admin@example.com >/dev/null 2>&1 \
-    || { echo "No se pudo crear el administrador de prueba (¿está aplicada la migración 003?)." >&2; exit 2; }
+    || { echo "No se pudo crear el administrador de prueba (¿está aplicada la migración 004?)." >&2; exit 2; }
 login_jar "$JAR"
 CSRF=$LTOKEN   # el token de la sesión del administrador de prueba: lo llevan todos los POST de abajo
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/")" = 200 ] && [ -n "$CSRF" ] || { echo "No se pudo iniciar sesión con el administrador de prueba." >&2; exit 2; }
-USERS_BEFORE=$(sql 'SELECT COUNT(*) FROM users;')
 echo "Pruebas contra $BASE (origen $ORIGIN); usuarios al empezar: $USERS_BEFORE"
 
 section "Inicio de sesión (M5): sin sesión no se entra a nada"
@@ -144,7 +143,7 @@ achk "una contraseña de 100.000 caracteres" 401 -b "$AJ" -c "$AJ" -H "Origin: $
 achk "login sin Origin ni Referer" 403 --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
 achk "login con Origin ajeno (con la clave CORRECTA)" 403 -H "Origin: http://evil.example" --data-urlencode "email=smoke-admin@example.com" --data-urlencode "password=$ADMIN_PW" "$BASE/login.php"
 [ -z "$(sed -nE 's/^[Ss]et-[Cc]ookie:.*/x/p' "$TMP/head")" ]; ok "...y no inicia ninguna sesión" $?
-[ "$(sql "SELECT COUNT(*) FROM admins WHERE email='smoke-admin@example.com' AND password_hash LIKE '\$2y\$%' AND INSTR(password_hash, '$ADMIN_PW') = 0;")" = 1 ]; ok "en la BD hay un hash bcrypt (\$2y\$), no la contraseña" $?
+[ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-admin@example.com' AND role='admin' AND password_hash LIKE '\$2y\$%' AND INSTR(password_hash, '$ADMIN_PW') = 0;")" = 1 ]; ok "en la BD hay un hash bcrypt (\$2y\$), no la contraseña" $?
 
 section "Inicio de sesión (M5): entrar, la cookie y la fijación de sesión"
 J2="$TMP/jar2"
@@ -643,7 +642,7 @@ chk "guardar al antiguo sin tocar nada nuevo" 302 -H "Origin: $ORIGIN" -d "csrf_
 chk "ponerle a otro un documento que ya existe" 409 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UOLD&name=Antiguo&last_name=Sin+Campos&email=smoke-m3-old@example.com&document=ab-12345&role=user" "$BASE/edit.php"
 grep -qF 'Ya existe otro usuario registrado con ese documento.' "$TMP/body"; ok "...con el aviso del documento" $?
 chk "guardar a A conservando SU PROPIO documento (no choca consigo mismo)" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&document=AB-12345&birth_date=1990-05-17&role=editor" "$BASE/edit.php"
-chk "cambiar el rol de A a admin" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&document=AB-12345&birth_date=1990-05-17&role=admin" "$BASE/edit.php"
+chk "cambiar el rol de A a admin" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&document=AB-12345&birth_date=1990-05-17&role=admin&password=clave-m3-larga-1&password_confirm=clave-m3-larga-1" "$BASE/edit.php"
 [ "$(sql "SELECT role FROM users WHERE id=$UA;")" = admin ]; ok "el rol cambió en la BD" $?
 chk "rol manipulado al editar" 422 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&role=root" "$BASE/edit.php"
 [ "$(sql "SELECT role FROM users WHERE id=$UA;")" = admin ]; ok "...y el rol guardado no cambió" $?
@@ -652,6 +651,97 @@ chk "quitar documento y fecha a A" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF
 chk "A guarda con la huella VIEJA tras cambiar solo el rol (el rol cuenta en la huella)" 409 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UA&row_token=$TOKEN_M3&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&role=user" "$BASE/edit.php"
 chk "fecha inválida al editar" 422 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UA&name=Mas&last_name=Campos&email=smoke-m3-a@example.com&birth_date=2023-02-30&role=admin" "$BASE/edit.php"
 tr -d '\n' < "$TMP/body" | grep -qE 'name="birth_date"\s+value="2023-02-30"'; ok "...y conserva lo escrito" $?
+
+section "Acceso de administradores: un usuario con rol admin y contraseña puede iniciar sesión"
+# Intenta iniciar sesión (jarra $1, correo $2, contraseña $3) y deja el código HTTP en $LOGIN_CODE.
+login_code() { anon_session "$1"; LOGIN_CODE=$(command curl -s -o /dev/null -w '%{http_code}' -b "$1" -c "$1" -H "Origin: $ORIGIN" --data-urlencode "csrf_token=$ATOKEN" --data-urlencode "email=$2" --data-urlencode "password=$3" "$BASE/login.php"); }
+chk "formulario de alta" 200 "$BASE/create.php"
+tr -d '\n' < "$TMP/body" | grep -qE '<div class="field" data-gate="admin">\s*<label for="password"[^>]*>Contraseña</label>\s*<input\s+type="password"\s+class="input"\s+id="password"\s+name="password"\s+autocomplete="new-password"'; ok "hay un campo de contraseña (type=password, autocomplete=new-password) que solo se enseña con el rol admin" $?
+tr -d '\n' < "$TMP/body" | grep -qE 'data-gate="admin">\s*<label for="password_confirm"[^>]*>Repite la contraseña</label>\s*<input\s+type="password"[^>]*id="password_confirm"'; ok "...y otro para repetirla" $?
+! grep -qE 'id="password(_confirm)?"[^>]*value=' "$TMP/body"; ok "los campos de contraseña NUNCA llevan value" $?
+grep -qF 'Mínimo 10 caracteres.' "$TMP/body"; ok "con una ayuda sobre la contraseña" $?
+ACC_PW="clave-acceso-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+post_user() { chk "$1" "$2" -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&name=Acceso&last_name=Prueba&email=$3&role=$4&password=$5&password_confirm=$6&document=&birth_date=&phone=" "$BASE/create.php"; }
+post_user "admin sin contraseña" 422 smoke-acc-a@example.com admin "" ""
+grep -qF 'Escribe una contraseña para que pueda iniciar sesión.' "$TMP/body"; ok "...avisa que hace falta" $?
+post_user "admin con contraseña que no coincide" 422 smoke-acc-a@example.com admin "$ACC_PW" "${ACC_PW}x"
+grep -qF 'Las contraseñas no coinciden.' "$TMP/body"; ok "...avisa que no coinciden" $?
+! grep -qF "$ACC_PW" "$TMP/body"; ok "...y la contraseña escrita NO se vuelve a pintar en la página" $?
+post_user "admin con contraseña corta" 422 smoke-acc-a@example.com admin "corta" "corta"
+grep -qF 'al menos 10 caracteres' "$TMP/body"; ok "...avisa que es corta" $?
+[ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-acc-a@example.com';")" = 0 ]; ok "ninguno de los intentos inválidos creó al usuario" $?
+post_user "admin con contraseña válida" 302 smoke-acc-a@example.com admin "$ACC_PW" "$ACC_PW"
+UACC=$(id_of smoke-acc-a@example.com)
+[ "$(sql "SELECT CONCAT(role,'|',IF(password_hash LIKE '\$2y\$%','bcrypt','no'),'|',IF(INSTR(password_hash,'$ACC_PW')=0,'sin-clave','CLAVE-EN-CLARO') ) FROM users WHERE id=$UACC;")" = "admin|bcrypt|sin-clave" ]; ok "se guardó el HASH bcrypt, no la contraseña" $?
+login_code "$TMP/jar_acc" smoke-acc-a@example.com "$ACC_PW"; [ "$LOGIN_CODE" = 302 ]; ok "el nuevo administrador INICIA SESIÓN con su correo y contraseña" $?
+achk "...y entra al listado" 200 -b "$TMP/jar_acc" "$BASE/"
+grep -qF 'smoke-acc-a@example.com</span>' "$TMP/body"; ok "...donde el encabezado dice que es él" $?
+login_code "$TMP/jar_acc2" smoke-acc-a@example.com "${ACC_PW}x"; [ "$LOGIN_CODE" = 401 ]; ok "con una contraseña incorrecta no entra (401)" $?
+chk "listado con el nuevo administrador" 200 --get --data-urlencode "q=smoke-acc-a" "$BASE/"
+grep -qF 'class="access" title="Puede iniciar sesión"' "$TMP/body"; ok "el listado marca con una llave a quien puede iniciar sesión" $?
+! grep -qE '\$2y\$' "$TMP/body"; ok "...y el hash nunca sale en ninguna página" $?
+
+section "Acceso: solo entra quien tiene rol admin, está activo y tiene contraseña"
+post_user "editor con contraseña (se ignora)" 302 smoke-acc-e@example.com editor "$ACC_PW" "$ACC_PW"
+UEDI=$(id_of smoke-acc-e@example.com)
+[ "$(sql "SELECT password_hash IS NULL FROM users WHERE id=$UEDI;")" = 1 ]; ok "con otro rol la contraseña NO se guarda" $?
+login_code "$TMP/jar_e" smoke-acc-e@example.com "$ACC_PW"; [ "$LOGIN_CODE" = 401 ]; ok "un editor no puede iniciar sesión, ni con esa contraseña" $?
+post_user "usuario normal" 302 smoke-acc-u@example.com user "" ""
+login_code "$TMP/jar_u" smoke-acc-u@example.com ""; [ "$LOGIN_CODE" = 422 ]; ok "un usuario normal no puede (y una clave vacía se pide)" $?
+post_user "admin sin contraseña heredado (SQL directo, como antes de esta función)" 302 smoke-acc-l@example.com user "" ""
+ULEG=$(id_of smoke-acc-l@example.com); sql "UPDATE users SET role='admin' WHERE id=$ULEG;" >/dev/null
+chk "editar a un admin SIN contraseña dejándola vacía" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$ULEG&name=Acceso&last_name=Heredado&email=smoke-acc-l@example.com&role=admin&password=&password_confirm=" "$BASE/edit.php"
+[ "$(sql "SELECT last_name FROM users WHERE id=$ULEG;")" = Heredado ]; ok "no se le exige una contraseña (ya era admin: el dato de antes sigue siendo válido)" $?
+chk "formulario de edición de un admin con acceso" 200 "$BASE/edit.php?id=$UACC"
+grep -qF 'Déjala vacía para conservar la actual.' "$TMP/body"; ok "la ayuda dice que vacía conserva la actual" $?
+! grep -qF "$ACC_PW" "$TMP/body" && ! grep -qE 'id="password(_confirm)?"[^>]*value=' "$TMP/body"; ok "...y la contraseña no está en el HTML" $?
+ACC_PW2="${ACC_PW}-nueva"
+chk "guardar al admin con la contraseña VACÍA" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UACC&name=Acceso&last_name=Cambiado&email=smoke-acc-a@example.com&role=admin&password=&password_confirm=" "$BASE/edit.php"
+login_code "$TMP/jar_a2" smoke-acc-a@example.com "$ACC_PW"; [ "$LOGIN_CODE" = 302 ]; ok "vacía conserva la contraseña: sigue entrando con la de siempre" $?
+chk "cambiar la contraseña" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UACC&name=Acceso&last_name=Cambiado&email=smoke-acc-a@example.com&role=admin&password=$ACC_PW2&password_confirm=$ACC_PW2" "$BASE/edit.php"
+login_code "$TMP/jar_a3" smoke-acc-a@example.com "$ACC_PW"; [ "$LOGIN_CODE" = 401 ]; ok "la contraseña vieja deja de valer" $?
+login_code "$TMP/jar_a4" smoke-acc-a@example.com "$ACC_PW2"; [ "$LOGIN_CODE" = 302 ]; ok "la nueva sí" $?
+chk "cambiar la contraseña con una repetición distinta" 422 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UACC&name=Acceso&last_name=Cambiado&email=smoke-acc-a@example.com&role=admin&password=otra-clave-larga&password_confirm=distinta-clave-larga" "$BASE/edit.php"
+login_code "$TMP/jar_a5" smoke-acc-a@example.com "$ACC_PW2"; [ "$LOGIN_CODE" = 302 ]; ok "...y no cambió nada (la nueva anterior sigue valiendo)" $?
+chk "cambiar el correo del administrador" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UACC&name=Acceso&last_name=Cambiado&email=smoke-acc-a2@example.com&role=admin&password=&password_confirm=" "$BASE/edit.php"
+login_code "$TMP/jar_a6" smoke-acc-a@example.com "$ACC_PW2"; [ "$LOGIN_CODE" = 401 ]; ok "con el correo VIEJO ya no entra (una sola fuente de verdad)" $?
+login_code "$TMP/jar_a7" smoke-acc-a2@example.com "$ACC_PW2"; [ "$LOGIN_CODE" = 302 ]; ok "con el nuevo sí" $?
+chk "ascender al editor a administrador SIN contraseña" 422 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UEDI&name=Acceso&last_name=Prueba&email=smoke-acc-e@example.com&role=admin&password=&password_confirm=" "$BASE/edit.php"
+grep -qF 'Escribe una contraseña para que pueda iniciar sesión.' "$TMP/body"; ok "...la contraseña es obligatoria al ascender" $?
+chk "ascender al editor a administrador CON contraseña" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UEDI&name=Acceso&last_name=Prueba&email=smoke-acc-e@example.com&role=admin&password=$ACC_PW&password_confirm=$ACC_PW" "$BASE/edit.php"
+login_code "$TMP/jar_e2" smoke-acc-e@example.com "$ACC_PW"; [ "$LOGIN_CODE" = 302 ]; ok "...y entra" $?
+chk "quitarle el rol de administrador" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UEDI&name=Acceso&last_name=Prueba&email=smoke-acc-e@example.com&role=editor&password=&password_confirm=" "$BASE/edit.php"
+[ "$(sql "SELECT password_hash IS NULL FROM users WHERE id=$UEDI;")" = 1 ]; ok "se BORRA su hash (no queda una contraseña guardada sin rol)" $?
+login_code "$TMP/jar_e3" smoke-acc-e@example.com "$ACC_PW"; [ "$LOGIN_CODE" = 401 ]; ok "...y deja de poder entrar" $?
+chk "volver a darle el rol sin contraseña" 422 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UEDI&name=Acceso&last_name=Prueba&email=smoke-acc-e@example.com&role=admin&password=&password_confirm=" "$BASE/edit.php"
+chk "eliminar (borrado lógico) al administrador" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UACC" "$BASE/delete.php"
+login_code "$TMP/jar_a8" smoke-acc-a2@example.com "$ACC_PW2"; [ "$LOGIN_CODE" = 401 ]; ok "un administrador ELIMINADO no puede iniciar sesión" $?
+chk "restaurarlo" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$UACC" "$BASE/restore.php"
+login_code "$TMP/jar_a9" smoke-acc-a2@example.com "$ACC_PW2"; [ "$LOGIN_CODE" = 302 ]; ok "...y al restaurarlo vuelve a entrar con la misma contraseña" $?
+chk "SQL y comillas en la contraseña" 302 -H "Origin: $ORIGIN" --data-urlencode "password=x'; DROP TABLE users; -- \"clave\\" --data-urlencode "password_confirm=x'; DROP TABLE users; -- \"clave\\" -d "csrf_token=$CSRF&id=$UACC&name=Acceso&last_name=Cambiado&email=smoke-acc-a2@example.com&role=admin" "$BASE/edit.php"
+login_code "$TMP/jar_a10" smoke-acc-a2@example.com "x'; DROP TABLE users; -- \"clave\\"; [ "$LOGIN_CODE" = 302 ]; ok "una contraseña con comillas, punto y coma y barra invertida se guarda y vale tal cual" $?
+[ "$(sql 'SELECT COUNT(*) > 0 FROM users;')" = 1 ]; ok "...y la tabla users sigue ahí" $?
+
+section "Acceso: nadie se quita a sí mismo el acceso"
+SELF=$(id_of smoke-acc-a2@example.com)
+login_code "$TMP/jar_self" smoke-acc-a2@example.com "x'; DROP TABLE users; -- \"clave\\"
+SELFTOK=$(command curl -s -b "$TMP/jar_self" "$BASE/create.php" | grep -oE 'name="csrf_token" value="[0-9a-f]{64}"' | head -1 | grep -oE '[0-9a-f]{64}')
+achk "como ese administrador: eliminarse a sí mismo" 302 -b "$TMP/jar_self" -H "Origin: $ORIGIN" -d "csrf_token=$SELFTOK&id=$SELF" "$BASE/delete.php"
+[ "$(header_of location)" = "Location: index.php?msg=self" ]; ok "se rechaza con un aviso (msg=self)" $?
+is_active "$SELF"; ok "...y sigue activo" $?
+achk "...el aviso se ve" 200 -b "$TMP/jar_self" "$BASE/index.php?msg=self"
+grep -qF 'No puedes eliminar tu propia cuenta' "$TMP/body"; ok "con su texto" $?
+achk "quitarse a sí mismo el rol de administrador" 422 -b "$TMP/jar_self" -H "Origin: $ORIGIN" -d "csrf_token=$SELFTOK&id=$SELF&name=Acceso&last_name=Cambiado&email=smoke-acc-a2@example.com&role=editor&password=&password_confirm=" "$BASE/edit.php"
+grep -qF 'No puedes quitarte el rol de administrador a ti mismo' "$TMP/body"; ok "se rechaza con su aviso" $?
+[ "$(sql "SELECT role FROM users WHERE id=$SELF;")" = admin ]; ok "...y sigue siendo administrador" $?
+achk "cambiarse el correo a sí mismo" 302 -b "$TMP/jar_self" -c "$TMP/jar_self" -H "Origin: $ORIGIN" -d "csrf_token=$SELFTOK&id=$SELF&name=Acceso&last_name=Cambiado&email=smoke-acc-a3@example.com&role=admin&password=&password_confirm=" "$BASE/edit.php"
+achk "...el encabezado enseña el correo nuevo sin volver a entrar" 200 -b "$TMP/jar_self" "$BASE/"
+grep -qF 'smoke-acc-a3@example.com</span>' "$TMP/body"; ok "(la sesión se actualiza)" $?
+chk "otro administrador SÍ puede eliminarlo" 302 -H "Origin: $ORIGIN" -d "csrf_token=$CSRF&id=$SELF" "$BASE/delete.php"
+[ "$(header_of location)" = "Location: index.php?msg=deleted" ]; ok "...con el aviso normal de eliminado" $?
+printf '%s\n' "clave-de-consola-1" | bin/as-migrator php scripts/create-admin.php smoke-acc-u@example.com 2>&1 | grep -qF 'ya era un usuario: ahora es administrador'; ok "la consola PROMUEVE a un usuario existente (no falla ni lo duplica)" $?
+login_code "$TMP/jar_c" smoke-acc-u@example.com "clave-de-consola-1"; [ "$LOGIN_CODE" = 302 ]; ok "...y entra con esa contraseña" $?
+[ "$(sql "SELECT COUNT(*) FROM users WHERE email='smoke-acc-u@example.com';")" = 1 ]; ok "...sin duplicar al usuario" $?
 
 section "Eliminar (delete.php)"
 chk "GET (no borra)" 405 "$BASE/delete.php?id=$U1"

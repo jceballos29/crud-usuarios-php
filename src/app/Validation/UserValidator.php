@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Validation;
 
+use App\Auth\AdminAuth;
 use App\Domain\User;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -46,6 +47,9 @@ final class UserValidator
             'document'   => ['label' => 'Documento de identidad', 'type' => 'text', 'required' => false, 'max' => 20],
             'birth_date' => ['label' => 'Fecha de nacimiento',    'type' => 'date', 'required' => false, 'max' => 10],
             'role'       => ['label' => 'Rol', 'type' => 'select', 'required' => true, 'max' => 0, 'options' => User::roles(), 'default' => User::ROLE_DEFAULT],
+            // Solo para el rol administrador (la vista los enseña solo con ese rol). Nunca se vuelven a pintar.
+            'password' => ['label' => 'Contraseña', 'type' => 'password', 'required' => false, 'max' => AdminAuth::PASSWORD_MAX_BYTES, 'gate' => 'admin'],
+            'password_confirm' => ['label' => 'Repite la contraseña', 'type' => 'password', 'required' => false, 'max' => AdminAuth::PASSWORD_MAX_BYTES, 'gate' => 'admin'],
         ];
     }
 
@@ -80,7 +84,8 @@ final class UserValidator
             $value = $source[$fieldName] ?? '';
             // Si no llega (o no es texto) un campo con valor por defecto se queda vacío, NO con el valor por
             // defecto: un envío sin rol no debe convertirse en un rol por sorpresa; validate_user() lo rechaza.
-            $data[$fieldName] = is_string($value) ? trim($value) : '';
+            // Las contraseñas NO se recortan: un espacio al principio o al final es parte de la contraseña.
+            $data[$fieldName] = is_string($value) ? (str_starts_with($fieldName, 'password') ? $value : trim($value)) : '';
         }
 
         // Normalización: el email se guarda siempre en minúsculas.
@@ -95,9 +100,11 @@ final class UserValidator
      * Valida los datos ya limpios. Devuelve solo el primer error de cada campo.
      *
      * @param array<string, string> $data Resultado de read().
+     * @param bool $requirePassword true si un administrador DEBE traer contraseña (alta, o ascender a alguien a ese rol);
+     *                              false al editar a quien ya es administrador (vacía = conservar la actual).
      * @return array<string, string> campo => mensaje (vacío si todo es válido)
      */
-    public function validate(array $data): array
+    public function validate(array $data, bool $requirePassword = true): array
     {
         $fields = $this->fields();
         $errors = [];
@@ -174,6 +181,22 @@ final class UserValidator
         // Rol: obligatorio y SOLO uno de la lista blanca (comparación estricta, sin conversiones de tipo).
         if (!array_key_exists($data['role'], $fields['role']['options'])) {
             $errors['role'] = 'Selecciona un rol de la lista.';
+        }
+
+        // Contraseña: solo cuenta con el rol administrador (con cualquier otro se ignora). Tiene que cumplir las reglas
+        // de siempre (AdminAuth::passwordError()) y coincidir con su repetición. Es obligatoria al crear a un
+        // administrador o al ascender a alguien a ese rol ($requirePassword); al editar a quien ya lo es, vacía
+        // significa «conservar la actual».
+        if ($data['role'] === 'admin') {
+            if ($data['password'] === '') {
+                if ($requirePassword) {
+                    $errors['password'] = 'Escribe una contraseña para que pueda iniciar sesión.';
+                }
+            } elseif (($passwordError = AdminAuth::passwordError($data['password'])) !== null) {
+                $errors['password'] = $passwordError;
+            } elseif ($data['password'] !== $data['password_confirm']) {
+                $errors['password_confirm'] = 'Las contraseñas no coinciden.';
+            }
         }
 
         return $errors;

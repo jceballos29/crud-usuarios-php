@@ -60,17 +60,47 @@ final class AdminAuth
             $errors['email'] = 'Ingresa un correo válido.';
         }
 
-        if (str_contains($password, "\0")) {
-            $errors['password'] = 'La contraseña no puede contener el carácter NUL.';
-        } elseif (preg_match('//u', $password) !== 1) {
-            $errors['password'] = 'La contraseña debe ser UTF-8 válido.';
-        } elseif (mb_strlen($password, 'UTF-8') < self::PASSWORD_MIN) {
-            $errors['password'] = sprintf('La contraseña debe tener al menos %d caracteres.', self::PASSWORD_MIN);
-        } elseif (strlen($password) > self::PASSWORD_MAX_BYTES) {
-            $errors['password'] = sprintf('La contraseña no puede superar los %d bytes (límite de bcrypt).', self::PASSWORD_MAX_BYTES);
+        $passwordError = self::passwordError($password);
+
+        if ($passwordError !== null) {
+            $errors['password'] = $passwordError;
         }
 
         return $errors;
+    }
+
+    /**
+     * ¿Vale esta contraseña NUEVA? Las mismas reglas para quien se crea desde consola y para un usuario con rol
+     * administrador que se registra o se edita en la aplicación (UserValidator).
+     *
+     * @param string $password Tal cual se escribió (no se recorta: los espacios cuentan).
+     * @return string|null El mensaje de error, o null si es válida.
+     */
+    public static function passwordError(string $password): ?string
+    {
+        if (str_contains($password, "\0")) {
+            return 'La contraseña no puede contener el carácter NUL.';
+        }
+
+        if (preg_match('//u', $password) !== 1) {
+            return 'La contraseña debe ser UTF-8 válido.';
+        }
+
+        if (mb_strlen($password, 'UTF-8') < self::PASSWORD_MIN) {
+            return sprintf('La contraseña debe tener al menos %d caracteres.', self::PASSWORD_MIN);
+        }
+
+        if (strlen($password) > self::PASSWORD_MAX_BYTES) {
+            return sprintf('La contraseña no puede superar los %d bytes (límite de bcrypt).', self::PASSWORD_MAX_BYTES);
+        }
+
+        return null;
+    }
+
+    /** El hash que se guarda (bcrypt con el coste actual de PHP): nunca la contraseña. Con una salt distinta cada vez. */
+    public static function hash(string $password): string
+    {
+        return password_hash($password, PASSWORD_DEFAULT);
     }
 
     /**

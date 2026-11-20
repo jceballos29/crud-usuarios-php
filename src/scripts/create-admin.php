@@ -3,18 +3,20 @@
 declare(strict_types=1);
 
 /**
- * Crea un administrador (quien puede iniciar sesión en la aplicación). Solo consola:
+ * Da acceso a un administrador (un usuario con rol admin y contraseña, que puede iniciar sesión). Solo consola. Si el
+ * correo ya es un usuario lo PROMUEVE; si no, crea uno. (Los demás administradores también se pueden registrar desde
+ * la pantalla «Registrar usuario» con el rol Administrador y una contraseña.)
  *
  *     bin/as-migrator php scripts/create-admin.php correo@ejemplo.com          # pide la contraseña
  *     bin/as-migrator php scripts/create-admin.php correo@ejemplo.com < clave.txt   # la lee de la entrada
  *     bin/as-migrator php scripts/create-admin.php correo@ejemplo.com 'la-clave'      # por argumento (¡ver abajo!)
  *
- * Se ejecuta con bin/as-migrator (el usuario de MIGRACIONES de la BD) y no con `docker compose exec php ...`: la
- * aplicación se conecta con un usuario que, por mínimo privilegio, NO puede insertar administradores (database/03-users.sh).
- * Así, aunque alguien lograra ejecutar SQL desde la aplicación, no podría darse de alta como administrador.
+ * Sirve para crear el PRIMER administrador (o recuperar el acceso si nadie puede entrar), cuando todavía no hay
+ * quien registre a los demás desde la aplicación. Funciona con el usuario de la aplicación o con el de migraciones; por
+ * costumbre se lanza con bin/as-migrator.
  *
- * Por qué un script y no un formulario de registro: quien se registrara solo podría administrar a todos.
- * Los administradores los crea quien tiene acceso al servidor.
+ * Por qué un script y no un registro público: nadie se hace administrador solo. Dentro de la aplicación solo otro
+ * administrador puede dar ese rol; el primero lo crea quien tiene acceso al servidor.
  *
  * La contraseña como ARGUMENTO queda en el historial del shell y en la lista de procesos (ps) mientras el
  * comando corre: úsalo solo en pruebas. Lo normal es dejar que la pida (sin mostrarla si hay terminal) o
@@ -77,20 +79,12 @@ if ($errors !== []) {
 }
 
 try {
-    (new AdminRepository(Connection::create()))->create($email, password_hash($password, PASSWORD_DEFAULT));
+    $created = (new AdminRepository(Connection::create()))->grantAccess($email, AdminAuth::hash($password));
 } catch (RuntimeException $error) {
-    if ($error instanceof PDOException && ($error->errorInfo[1] ?? null) === 1062) {
-        fwrite(STDERR, "Error: ya existe un administrador con ese correo.\n");
-        exit(1);
-    }
-
-    if ($error instanceof PDOException && in_array($error->errorInfo[1] ?? null, [1142, 1044], true)) {
-        fwrite(STDERR, "Error: el usuario de la BD de la aplicación no puede insertar administradores (es lo esperado).\nEjecútalo con el usuario de migraciones: bin/as-migrator php scripts/create-admin.php <correo>\n");
-        exit(1);
-    }
-
     fwrite(STDERR, 'Error: no se pudo crear el administrador (' . $error->getMessage() . ")\n");
     exit(1);
 }
 
-echo "Administrador creado: $email\n";
+echo $created
+    ? "Administrador creado: $email\n"
+    : "Ese correo ya era un usuario: ahora es administrador (activo) y tiene esa contraseña: $email\n";

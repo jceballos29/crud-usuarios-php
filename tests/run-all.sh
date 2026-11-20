@@ -29,6 +29,7 @@ run "integración" bin/as-migrator php tests/integration.php
 run "migración 001" tests/migration-001.sh
 run "migración 002" tests/migration-002.sh
 run "migración 003" tests/migration-003.sh
+run "migración 004" tests/migration-004.sh
 run "permisos de la BD" tests/privileges.sh
 run "punta a punta" tests/smoke.sh $STOP_FLAG
 
